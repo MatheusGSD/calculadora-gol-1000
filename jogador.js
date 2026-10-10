@@ -1,15 +1,14 @@
-/* PROTÓTIPO (descartável) — Gol 1000 de qualquer jogador.
- * Pergunta: a corrida ao gol 1000 generaliza para qualquer jogador, um por vez, com dados ao vivo?
- * Dados: jogadores em atividade vêm da Transfermarkt jogo a jogo (via prototipo-jogador/servidor.py); lendas vêm de
- * lendas.js, curado à mão por temporada, porque a Transfermarkt não tem o futebol dos anos 50-70.
- * Modelo: o mesmo Gamma-Poisson de ../sim.js (ritmo por jogo com peso que cai pela metade a cada 300 dias), com
+/* Gol 1000 de qualquer jogador — calculadora: um jogador por vez, meta sempre 1000. Depende de sim.js (window.Sim).
+ * Dados: jogadores da Transfermarkt jogo a jogo, ao vivo (via tools/servidor.py); lendas vêm de data/lendas.json,
+ * curado à mão por temporada (tools/build_lendas.py), porque a Transfermarkt não tem o futebol dos anos 50-70.
+ * Modelo: o mesmo Gamma-Poisson de sim.js (ritmo por jogo com peso que cai pela metade a cada 300 dias), com
  * calendário sintético (N jogos oficiais por ano). Duas perguntas:
  *   1. em atividade: chance de chegar a 1000 antes da aposentadoria (simulação);
  *   2. todos: com que idade chegaria se nunca parasse (projeção com o ritmo atual, por absurda que seja). */
 (function () {
   'use strict';
   const S = window.Sim;
-  const LENDAS = window.LENDAS || [];
+  let LENDAS = [];   // data/lendas.json, carregado no início
   const DAY = 86400000, YEAR = 365.25;
   const HALF_LIFE = 300;     // a meia-vida ajustada na página principal (data.json > halfLifeFit.best)
   const PRIOR = [0.5, 0];    // Jeffreys, como na página principal
@@ -154,6 +153,21 @@
     return null;
   }
 
+  /* Onde termina o ritmo de um aposentado: no último bloco, salvo um retorno isolado no fim da carreira (menos de 10
+   * jogos, mais de um ano depois do resto), como o jogo único do Romário pelo America-RJ em 2009 ou os 5 jogos do Bican
+   * em 1957. Os gols do retorno contam
+   * no total; só o ritmo e os jogos por ano são medidos antes dele. */
+  function paceEnd(blocks) {
+    let games = 0;
+    for (let k = blocks.length - 1; k > 0; k--) {
+      games += blocks[k].games;
+      if (games >= 10) break;
+      const before = Math.max(...blocks.slice(0, k).map((g) => g.to));
+      if (blocks[k].from - before > 365) return before;
+    }
+    return blocks[blocks.length - 1].to;
+  }
+
   // ---------- simulação: só para quem está em atividade, até a aposentadoria ----------
   function simulate(m) {
     const { a, b, total, start, birth, retireDay, gpy, decline } = m;
@@ -265,7 +279,7 @@
       const slug = /^\/([^/]+)\//.exec((transf && transf.url) || '');
       const slugName = slug ? slug[1].split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : null;
       setup({ kind: 'tm', id, name: hint.name || slugName || `Jogador ${id}`, profile: hint, legend: null, career, retired,
-        ref: retired ? last.to : today, fetchedAt: new Date() });
+        ref: retired ? paceEnd(career.blocks) : today, end: retired ? last.to : today, fetchedAt: new Date() });
       history.replaceState(null, '', '?id=' + id);
       profileP.then((p) => {
         if (!p || seq !== state.seq) return;
@@ -286,8 +300,9 @@
     if (!L) return;
     const seq = ++state.seq;
     const career = legendCareer(L);
-    const end = L.careerEnd ? dayOf(L.careerEnd, true) : career.blocks[career.blocks.length - 1].to;
-    setup({ kind: 'lenda', id: slug, name: L.name, profile: null, legend: L, career, retired: true, ref: end, fetchedAt: null });
+    // o fim da última temporada (careerEnd costuma vir só com o ano)
+    const end = career.blocks[career.blocks.length - 1].to;
+    setup({ kind: 'lenda', id: slug, name: L.name, profile: null, legend: L, career, retired: true, ref: paceEnd(career.blocks), end, fetchedAt: null });
     history.replaceState(null, '', '?lenda=' + slug);
     // a foto vem da busca da Transfermarkt, se o jogador estiver lá
     if (L.tmId) {
@@ -352,11 +367,11 @@
     const games365 = lastYear.reduce((s, g) => s + g.games * overlap(g, state.ref - 365, state.ref), 0);
     const goals365 = lastYear.reduce((s, g) => s + g.goals * overlap(g, state.ref - 365, state.ref), 0);
     $('ultimoAno').textContent = `${plural(goals365, 'gol', 'gols')} em ${plural(games365, 'jogo', 'jogos')} ${state.retired ? 'no último ano de carreira' : 'nos últimos 12 meses'}` +
-      (state.retired ? ` · encerrou em ${fmtDay(state.ref)}, aos ${Math.floor(state.ageRef)} anos` : '');
+      (state.retired ? ` · encerrou em ${L ? yearOf(state.end) : fmtDay(state.end)}, aos ${Math.floor(ageAt(state.end))} anos` : '');
     $('total').textContent = fmtInt(state.total);
     $('falta').textContent = state.total >= 1000 ? 'já passou dos 1000' : `${state.retired ? 'faltaram' : 'faltam'} ${fmtInt(1000 - state.total)}`;
     $('totalTodos').hidden = !(L && L.allTotal);
-    if (L && L.allTotal) $('totalTodos').textContent = `${fmtInt(L.allTotal.goals)} contando amistosos (${L.allTotal.label})`;
+    if (L && L.allTotal) $('totalTodos').textContent = `${fmtInt(L.allTotal.goals)} contando amistosos`;
     const live = blocks.find((g) => g.live);
     $('aoVivo').hidden = !live;
     if (live) $('aoVivo').textContent = `Jogo em andamento (${STATE_PT[live.state] || 'ao vivo'}): ${plural(live.goals, 'gol', 'gols')} até agora, já somado${live.goals === 1 ? '' : 's'} ao total.`;
@@ -398,11 +413,11 @@
       $('encerradaBig').textContent = ms ? `aos ${Math.floor(ageAt(ms.day))} anos` : fmtInt(state.total);
       $('encerradaTxt').textContent = ms
         ? `fez o gol 1000 oficial ${ms.exact ? 'em ' + fmtDay(ms.day) : 'na temporada ' + (ms.block.season || yearOf(ms.day))}`
-        : `gols oficiais quando parou, em ${yearOf(state.ref)}, aos ${Math.floor(state.ageRef)} anos`;
+        : `gols oficiais quando parou, em ${yearOf(state.end)}, aos ${Math.floor(ageAt(state.end))} anos`;
       const m = L && L.milestone1000;
       $('encerradaMarco').hidden = !m;
       if (m) {
-        $('encerradaMarco').innerHTML = `Na contagem ${esc(m.count)}, o gol 1000 saiu em <strong>${fmtDay(dayOf(m.date))}</strong>, aos ${Math.floor(ageAt(dayOf(m.date)))} anos` +
+        $('encerradaMarco').innerHTML = `${/^contagem/i.test(m.count) ? 'Na' : 'Na contagem'} ${esc(m.count)}, o gol 1000 saiu em <strong>${fmtDay(dayOf(m.date))}</strong>, aos ${Math.floor(ageAt(dayOf(m.date)))} anos` +
           (m.match ? `: ${esc([m.how, m.match].filter(Boolean).join(', '))}` : '') + '.' +
           (L.allTotal ? ` Nessa contagem, terminou com ${fmtInt(L.allTotal.goals)}.` : '');
       }
@@ -441,7 +456,8 @@
     const rows = [];
     if (L) {
       rows.push(['Fonte', `dados curados à mão, por temporada: ${(L.sources || []).map((u, i) => `<a href="${esc(u)}" target="_blank" rel="noopener">${i + 1}</a>`).join(' ')}`]);
-      if (L.officialTotal) rows.push(['Total oficial citado', `${fmtInt(L.officialTotal.goals)} gols em ${fmtInt(L.officialTotal.games)} jogos` + (L.officialTotal.goals !== state.total ? ` (soma das temporadas: ${fmtInt(state.total)})` : '')]);
+      if (L.officialTotal) rows.push(['Total oficial citado', `${fmtInt(L.officialTotal.goals)} gols` + (L.officialTotal.games ? ` em ${fmtInt(L.officialTotal.games)} jogos` : '') +
+        (L.officialTotal.goals !== state.total ? ` (soma das temporadas usadas aqui: ${fmtInt(state.total)})` : '')]);
       if (L.notes) rows.push(['Observações', esc(L.notes)]);
     } else {
       rows.push(['Fonte', `Transfermarkt, jogo a jogo; consultado às ${state.fetchedAt.toLocaleTimeString('pt-BR')}`]);
@@ -450,6 +466,7 @@
     if (!L) rows.push(['Excluídos', c.dropped.length ? c.dropped.map(([k, v]) => `${esc(k)}: ${plural(v.games, 'jogo', 'jogos')}, ${plural(v.goals, 'gol', 'gols')}`).join('<br>') : 'nada']);
     rows.push(['Ritmo por jogo', `posteriori Gamma(a = ${fmtDec(r.a, 1)}, b = ${fmtDec(r.b, 1)}), peso que cai pela metade a cada ${HALF_LIFE} dias antes de ${fmtDay(state.ref)}; mediana ${fmtDec(r.q50)}, faixa de 80%: ${fmtDec(r.q10)} a ${fmtDec(r.q90)} (média ponderada dos jogos: ${fmtDec(r.mean)})`]);
     rows.push(['Jogos por ano', `${state.gpy} (medido nos 2 anos antes de ${fmtDay(state.ref)}: ${fmtDec(state.gpyAuto, 1)})`]);
+    if (state.end !== state.ref) rows.push(['Fim do ritmo', `${fmtDay(state.ref)}: o retorno isolado até ${fmtDay(state.end)} conta no total, mas fica fora do ritmo e dos jogos por ano`]);
     rows.push(['Queda por idade', state.decline ? `ritmo × ${fmtDec(1 - state.decline)} a cada ano depois dos ${fmtDec(Math.max(DECLINE_FROM, state.ageRef), 1)} anos` : 'nenhuma']);
     if (s) rows.push(['Simulação', `${fmtInt(N_SIMS)} carreiras, semente ${SEED}, ${fmtInt(s.days.length)} jogos sintéticos até ${fmtDay(state.retireDay)}; ${fmtInt(state.ms)} ms`]);
     rows.push(['Projeção sem aposentadoria', 'gols esperados com o ritmo mediano; a faixa usa os ritmos de 10% e 90%. Sem sorteio: é conta, não simulação.']);
@@ -493,7 +510,7 @@
     const { ctx, w, h } = fitCanvas($('carreira'));
     const s = state.sim, blocks = state.career.blocks, pj = state.proj;
     // o eixo vai até o gol 1000 projetado, se ele cair antes dos 100 anos; senão para 15 anos depois do ponto de partida
-    const end = state.retired ? state.ref + 2 * YEAR : state.retireDay;
+    const end = state.retired ? state.end + 2 * YEAR : state.retireDay;
     const projVisible = pj.p50 != null && ageAt(pj.p50) <= 100;
     const x0 = blocks[0].from - 120, x1 = Math.max(end, projVisible ? pj.p50 : state.ref + 15 * YEAR) + 120;
     const yMax = Math.max(1000, s ? s.finalP90 : 0, state.total) * 1.06;
@@ -523,17 +540,14 @@
       pj.path.forEach(([d, v], i) => (i ? ctx.lineTo(X(d), Y(Math.min(v, 1000))) : ctx.moveTo(X(d), Y(v))));
       ctx.stroke(); ctx.setLineDash([]);
     }
-    // carreira real: em temporadas, a linha sobe ao longo do bloco
+    // carreira real: gols acumulados em cada início/fim de bloco; dentro de uma temporada a linha sobe por igual
+    // (temporadas de clube e anos de seleção se sobrepõem, por isso a soma é feita data a data)
     ctx.strokeStyle = fg; ctx.lineWidth = 2; ctx.beginPath();
-    let cum = 0;
-    ctx.moveTo(X(blocks[0].from), Y(0));
-    for (const g of blocks) {
-      if (g.from !== g.to) ctx.lineTo(X(g.from), Y(cum));
-      cum += g.goals;
-      ctx.lineTo(X(g.to), Y(cum));
-    }
+    const pts = [...new Set(blocks.flatMap((g) => [g.from, g.to]))].sort((x, y) => x - y);
+    ctx.moveTo(X(pts[0]), Y(0));
+    for (const d of pts) ctx.lineTo(X(d), Y(cumAtDay(d)));
     ctx.stroke();
-    vline(ctx, X, state.ref, state.retired ? 'fim da carreira' : 'hoje', pad, h);
+    vline(ctx, X, state.end, state.retired ? 'fim da carreira' : 'hoje', pad, h);
     if (!state.retired) vline(ctx, X, state.retireDay, `aposenta aos ${state.retireAge}`, pad, h, 'left');
     if (projVisible && state.total < 1000) {
       ctx.strokeStyle = gold; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(pj.p50), Y(1000), 6, 0, 2 * Math.PI); ctx.stroke();
@@ -550,7 +564,7 @@
       ctx.fillStyle = gold; ctx.beginPath(); ctx.arc(X(d), Y(yv), 5, 0, 2 * Math.PI); ctx.fill();
       if (lm && d === dayOf(lm.date)) {
         ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.font = `600 12px ${cssVar('--font-body')}`;
-        ctx.fillText(`gol 1000 ${lm.count} (${yearOf(d)}); aqui, só oficiais`, X(d) + 8, Y(yv) - 4);
+        ctx.fillText(`gol 1000 contando amistosos (${yearOf(d)})`, X(d) + 8, Y(yv) - 4);
       }
     }
     ctx.restore();
@@ -627,12 +641,32 @@
   let resizeTimer = null;
   const redraw = () => { if (!state.proj) return; drawCareer(); if (state.sim) drawCdf(); };
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 120); });
-  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', redraw);
 
-  renderPresets();
-  const qs = new URLSearchParams(location.search);
-  const startId = qs.get('id'), startLenda = qs.get('lenda');
-  if (startLenda && LENDAS.some((L) => L.id === startLenda)) loadLegend(startLenda);
-  else if (startId && /^\d+$/.test(startId)) loadPlayer(startId, { name: PRESETS.find((p) => p[0] === startId)?.[1] });
-  else loadPlayer('38253', { name: 'Lewandowski' });
+  // ---------- tema (mesma preferência da corrida Messi × CR7) ----------
+  function effectiveTheme() {
+    const t = document.documentElement.getAttribute('data-theme');
+    if (t === 'light' || t === 'dark') return t;
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  function syncThemeBtn() { $('themeBtn').textContent = effectiveTheme() === 'dark' ? 'Tema claro' : 'Tema escuro'; }
+  try { const saved = localStorage.getItem('gol1000-theme'); if (saved === 'light' || saved === 'dark') document.documentElement.setAttribute('data-theme', saved); } catch (e) { /* sem armazenamento */ }
+  $('themeBtn').addEventListener('click', () => {
+    const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('gol1000-theme', next); } catch (e) { /* ok */ }
+  });
+  new MutationObserver(() => { syncThemeBtn(); redraw(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { syncThemeBtn(); redraw(); });
+  syncThemeBtn();
+
+  // ---------- início ----------
+  getJSON('data/lendas.json').catch(() => []).then((lendas) => {
+    LENDAS = lendas;
+    renderPresets();
+    const qs = new URLSearchParams(location.search);
+    const startId = qs.get('id'), startLenda = qs.get('lenda');
+    if (startLenda && LENDAS.some((L) => L.id === startLenda)) loadLegend(startLenda);
+    else if (startId && /^\d+$/.test(startId)) loadPlayer(startId, { name: PRESETS.find((p) => p[0] === startId)?.[1] });
+    else loadPlayer('38253', { name: 'Lewandowski' });
+  });
 })();

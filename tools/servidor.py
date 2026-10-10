@@ -1,4 +1,4 @@
-"""PROTÓTIPO (descartável): serve a página "Gol 1000 de qualquer jogador" e repassa as consultas à Transfermarkt.
+"""Serve as páginas do projeto e repassa à Transfermarkt as consultas da calculadora (jogador.html).
 
 Por que um servidor: a busca por nome é uma página HTML da Transfermarkt, que o navegador não pode ler de outro
 site (CORS). Aqui tudo passa por /api/..., com um cache curto em memória para não martelar as fontes.
@@ -9,7 +9,9 @@ site (CORS). Aqui tudo passa por /api/..., com um cache curto em memória para n
   /api/perfil/132098         -> transfermarkt-api.fly.dev/players/132098/profile     (foto e posição; API
                                 comunitária e instável, por isso a página não depende dela)
 
-Uso:  python -I prototipo-jogador/servidor.py      (abre http://localhost:8765/prototipo-jogador/)
+Os endpoints da Transfermarkt não são documentados: podem mudar ou ser bloqueados sem aviso.
+
+Uso:  python -I tools/servidor.py      (abre http://localhost:8765/jogador.html)
 """
 import html
 import http.server
@@ -25,7 +27,7 @@ import webbrowser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = 8765
-UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) prototipo-gol1000'
+UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) gol1000'
 ROUTES = {
     'busca': ('https://www.transfermarkt.com/schnellsuche/ergebnis/schnellsuche?query={}&Spieler_page=0', 3600, 15),
     'jogos': ('https://www.transfermarkt.com/ceapi/performance-game/{}', 60, 40),
@@ -118,9 +120,9 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 if __name__ == '__main__':
-    url = f'http://localhost:{PORT}/prototipo-jogador/'
+    url = f'http://localhost:{PORT}/jogador.html'
     with Server(('127.0.0.1', PORT), Handler) as srv:
-        print('Protótipo no ar:', url, '(Ctrl+C para parar)', flush=True)
+        print('No ar:', url, '(Ctrl+C para parar)', flush=True)
         if os.environ.get('SEM_NAVEGADOR') != '1':
             threading.Timer(0.6, lambda: webbrowser.open(url)).start()
         srv.serve_forever()
