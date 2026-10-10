@@ -8,7 +8,6 @@
   const COLOR_VARS = ['--messi', '--cr7'];
   const DAY = 86400000;
   const TODAY = S.dayNum(D.asOf);
-  const VIEW_START = S.dayNum('2023-01-01');
   const NEVER = 2147483647;
   const $ = (id) => document.getElementById(id);
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -30,6 +29,8 @@
   const monthStart = (d) => { const x = dt(d); return Math.floor(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), 1) / DAY); };
   const addMonths = (d, k) => { const x = dt(d); return Math.floor(Date.UTC(x.getUTCFullYear(), x.getUTCMonth() + k, 1) / DAY); };
   const yearStart = (y) => Math.floor(Date.UTC(y, 0, 1) / DAY);
+  // a corrida começa um ano antes de hoje: mostra o momento de cada um sem achatar a parte simulada
+  const VIEW_START = addMonths(TODAY, -12);
   function rangeMonths(d1, d2) { const x = dt(d1); return x.getUTCFullYear() * 12 + x.getUTCMonth() - (dt(d2).getUTCFullYear() * 12 + dt(d2).getUTCMonth()); }
 
   // ---------- tema ----------
@@ -104,12 +105,12 @@
   [...D.windows.map((w) => [w.id, w.label]), ['custom', 'Recorte livre']].forEach(([id, label]) => {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = label; b.dataset.win = id;
-    b.addEventListener('click', () => selectWindow(id));
+    b.addEventListener('click', () => selectWindow(id, true));
     chipsEl.appendChild(b);
   });
   function syncChips() { chipsEl.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.win === state.win))); }
 
-  function selectWindow(id) {
+  function selectWindow(id, focus) {
     state.win = id;
     syncChips();
     $('customBox').hidden = id !== 'custom';
@@ -118,7 +119,7 @@
       setupCustom();
       if (!customValid()) { updateWindowNote(paramsFor('custom')); return; }
     }
-    startRun();
+    startRun({ focus });
   }
 
   // ---------- nota do recorte ----------
@@ -141,7 +142,8 @@
   // ---------- simulação principal ----------
   let run = null, token = 0, fan = null, summary = null, firstDays = null, sweepDay = NEVER, viewEnd = TODAY + 1500;
 
-  function startRun() {
+  // opts.focus: a rodada veio de um clique (recorte, rodar de novo...), então a página vai até a corrida
+  function startRun(opts) {
     const my = ++token;
     const wp = paramsFor(state.win);
     updateWindowNote(wp);
@@ -149,9 +151,14 @@
     run = S.createRun({ nSims: state.nSims, seed: state.seed, players: playersFor(wp), months: MONTHS, quantileSims: 3000, drawSims: 160 });
     run.wp = wp;
     fan = null; summary = null; firstDays = null; sweepDay = TODAY;
+    sweeping = false; pendingSweep = null; setLive(false); brush = null;
+    if (zoomAnim) { cancelAnimationFrame(zoomAnim); zoomAnim = null; }
+    view = state.speed === 'none' ? null : cameraAt(TODAY);
     $('verdictText').textContent = 'Simulando…';
     $('simCounter').textContent = `${fmtInt(run.N)} simulações`;
     setBar(0, 0, 1, 0, 'sweep');
+    drawRace();
+    if (opts && opts.focus) focusStage();
     // calcula tudo de uma vez (100 mil simulações levam menos de 1 s); a animação é a varredura no tempo
     setTimeout(() => { if (my !== token) return; S.step(run, run.N); finish(my); }, 30);
   }
@@ -175,29 +182,72 @@
     loadReplay(Math.min(run.N, Math.max(1, +$('simNo').value || 1)));
     scheduleCompare();
     if (state.speed === 'none' || document.hidden) { endSweep(); return; }
-    const dur = state.speed === 'slow' ? 9000 : 4500;
+    // a corrida só larga com o gráfico na tela; fora dela, espera a página chegar até ele
+    if (raceOnScreen()) beginSweep(my);
+    else {
+      pendingSweep = () => beginSweep(my);
+      $('verdictText').textContent = 'Simulação pronta. Role até o gráfico para ver a corrida.';
+    }
+  }
+  // tempo da animação -> data: largada lenta (o CR7 está a poucos gols), meio rápido e chegada suave
+  const sweepEase = (t) => t * t * (0.592 + 2.816 * t - 2.408 * t * t);
+  function beginSweep(my) {
+    if (my !== token) return;
+    const dur = state.speed === 'slow' ? 14000 : 7000;
     const t0 = performance.now();
-    sweeping = true;
+    sweeping = true; setLive(true); bursts = [0, 0]; setZoomMode('cam');
     const anim = (now) => {
       if (my !== token || !sweeping) return;
-      const t = Math.min(1, (now - t0) / dur);
-      const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      sweepDay = Math.round(TODAY + e * (viewEnd - TODAY));
+      const t = Math.max(0, Math.min(1, (now - t0) / dur));
+      sweepDay = Math.round(TODAY + sweepEase(t) * (viewEnd - TODAY));
+      view = cameraAt(sweepDay);
+      summary.per.forEach((p, pi) => { if (!bursts[pi] && p.p50 && sweepDay >= p.p50) bursts[pi] = now; });
       drawRace();
       sweepVerdict();
       if (t < 1) requestAnimationFrame(anim); else endSweep();
     };
     requestAnimationFrame(anim);
   }
-  let sweeping = false;
-  function endSweep() { sweeping = false; sweepDay = NEVER; drawRace(); finalVerdict(); }
+  let sweeping = false, pendingSweep = null;
+  function endSweep() {
+    sweeping = false; pendingSweep = null; setLive(false); sweepDay = NEVER;
+    view = fullView(); setZoomMode('all');
+    drawRace(); finalVerdict();
+  }
+  const setLive = (on) => $('stage').classList.toggle('live', on);
   // aba escondida não roda requestAnimationFrame: mostra o resultado final direto
   document.addEventListener('visibilitychange', () => { if (document.hidden && sweeping) endSweep(); });
+
+  // ---------- a corrida em evidência ----------
+  const RACE_VISIBLE = 0.7;
+  let raceRatio = null;
+  function raceOnScreen() {
+    if (!('IntersectionObserver' in window)) return true;
+    if (raceRatio != null) return raceRatio >= RACE_VISIBLE;
+    const r = raceCv.getBoundingClientRect(), vh = window.innerHeight || document.documentElement.clientHeight;
+    return r.height > 0 && (Math.min(r.bottom, vh) - Math.max(r.top, 0)) / r.height >= RACE_VISIBLE;
+  }
+  // o observador mede contra a janela de verdade, mesmo com a página dentro de um iframe
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver((es) => {
+      raceRatio = es[es.length - 1].intersectionRatio;
+      if (pendingSweep && raceRatio >= RACE_VISIBLE) { const go = pendingSweep; pendingSweep = null; go(); }
+    }, { threshold: [0, 0.4, RACE_VISIBLE, 1] }).observe($('race'));
+  }
+  // rola até deixar veredito e gráfico inteiros na tela (ou só o gráfico, se os dois não couberem)
+  function focusStage() {
+    const vh = window.innerHeight || document.documentElement.clientHeight, pad = 12;
+    const v = $('stage').querySelector('.st-verdict').getBoundingClientRect(), c = $('race').getBoundingClientRect();
+    const fits = c.bottom - v.top + 2 * pad <= vh;
+    if (fits ? v.top >= 0 && c.bottom <= vh : c.top >= 0 && c.bottom <= vh) return;
+    const delta = fits ? v.top - pad : c.top - Math.max(pad, (vh - c.height) / 2);
+    window.scrollTo({ top: window.scrollY + delta, behavior: reduceMotion ? 'auto' : 'smooth' });
+  }
 
   const countLE = (arr, d) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] <= d) lo = mid + 1; else hi = mid; } return lo; };
 
   function setBar(c, t, n, m, mode) {
-    const segs = [['segC', c], ['segT', t], ['segN', n], ['segM', m]];
+    const segs = [['segM', m], ['segT', t], ['segN', n], ['segC', c]];
     let seen = false;
     segs.forEach(([id, v]) => {
       const el = $(id);
@@ -217,8 +267,9 @@
     const N = run.N;
     const m = countLE(firstDays[0], sweepDay) / N, c = countLE(firstDays[1], sweepDay) / N, t = countLE(firstDays[2], sweepDay) / N;
     setBar(c, t, Math.max(0, 1 - m - c - t), m, 'sweep');
-    const lead = c >= m ? `CR7 já chegou primeiro em ${fmtPct(c)}` : `Messi já chegou primeiro em ${fmtPct(m)}`;
-    $('verdictText').textContent = `Em ${fmtMonth(sweepDay)}: ${lead} das simulações.`;
+    const lead = c + m + t === 0 ? 'ninguém chegou aos 1000 ainda'
+      : c >= m ? `CR7 já chegou primeiro em ${fmtPct(c)} das simulações` : `Messi já chegou primeiro em ${fmtPct(m)} das simulações`;
+    $('verdictText').textContent = `Em ${fmtMonth(sweepDay)}: ${lead}.`;
   }
 
   function finalVerdict() {
@@ -226,8 +277,8 @@
     setBar(c, s.tie, s.none, m, 'final');
     const nC = Math.round(c * s.n), nM = Math.round(m * s.n);
     let txt;
-    if (c >= 0.995) txt = `Cristiano Ronaldo chega primeiro em praticamente todas as simulações (${fmtInt(nC)} de ${fmtInt(s.n)}).`;
-    else if (m >= 0.995) txt = `Messi chega primeiro em praticamente todas as simulações (${fmtInt(nM)} de ${fmtInt(s.n)}).`;
+    if (c >= 0.995) txt = `Cristiano Ronaldo chega primeiro em ${fmtInt(nC)} de ${fmtInt(s.n)} simulações.`;
+    else if (m >= 0.995) txt = `Messi chega primeiro em ${fmtInt(nM)} de ${fmtInt(s.n)} simulações.`;
     else if (c >= m) txt = `Cristiano Ronaldo chega primeiro em ${fmtPct(c)} das simulações. Messi, em ${fmtPct(m)}.`;
     else txt = `Messi chega primeiro em ${fmtPct(m)} das simulações. Cristiano Ronaldo, em ${fmtPct(c)}.`;
     $('verdictText').textContent = txt;
@@ -251,44 +302,104 @@
   // ---------- gráfico da corrida ----------
   const raceCv = $('race'), raceTip = $('raceTip');
   let raceGeom = null, hoverX = null;
+  // view: janela de tempo visível {x0, x1}; o eixo Y se ajusta sozinho a ela. zoomMode: 'cam' (animação), 'near', 'all' ou 'brush'
+  let view = null, zoomMode = 'all', zoomAnim = null, brush = null, bursts = [0, 0];
+
+  const fullView = () => ({ x0: VIEW_START, x1: viewEnd });
+  // perto de hoje: até o fim da janela de 80% de quem chega antes
+  function nearView() {
+    const p90 = summary ? Math.min(...summary.per.map((p) => p.p90 || NEVER)) : NEVER;
+    const end = p90 === NEVER ? TODAY + 365 : p90 + 45;
+    return { x0: TODAY - 45, x1: Math.max(TODAY + 200, Math.min(TODAY + 600, end)) };
+  }
+  // câmera da animação: começa colada em hoje e vai abrindo para manter o cursor perto da borda direita
+  const CAM0 = { x0: TODAY - 30, x1: TODAY + 120 };
+  function cameraAt(sd) {
+    const f = fullView();
+    const x1 = Math.min(f.x1, Math.max(CAM0.x1, sd + 0.22 * (sd - CAM0.x0)));
+    const k = Math.max(0, Math.min(1, (x1 - CAM0.x1) / (f.x1 - CAM0.x1)));
+    return { x0: CAM0.x0 + (f.x0 - CAM0.x0) * Math.pow(k, 0.6), x1 };
+  }
+
+  // valor contínuo das curvas (interpolação linear), para a câmera e as cabeças da corrida andarem sem saltos
+  function histAt(pi, d) {
+    const hs = HIST[pi];
+    let pd = hs[0][0], pv = hs[0][1];
+    for (const [dd, vv] of hs) { if (dd >= d) return dd === pd ? vv : pv + (vv - pv) * (d - pd) / (dd - pd); pd = dd; pv = vv; }
+    return pv;
+  }
+  function fanAt(pi, d, key) {
+    if (!fan || d <= TODAY) return START[pi];
+    let pd = TODAY, pv = START[pi];
+    for (const r of fan[pi]) { if (r.d >= d) return pv + (r[key] - pv) * (d - pd) / (r.d - pd); pd = r.d; pv = r[key]; }
+    return pv;
+  }
+  // menor valor visível fica um pouco acima do eixo; os 1000 sempre aparecem
+  function fitY(x0) {
+    const lo = Math.min(...[0, 1].map((pi) => (x0 < TODAY ? histAt(pi, x0) : fanAt(pi, x0, 'p10'))));
+    return Math.min(lo - Math.max(3, 0.08 * (1000 - lo)), 980);
+  }
+  function yStep(span, px) {
+    for (const s of [1, 2, 5, 10, 20, 25, 50, 100]) if (px / (span / s) >= 34) return s;
+    return 100;
+  }
+  function xTicks(x0, x1, plotW) {
+    const ppm = plotW / ((x1 - x0) / 30.44), out = [];
+    const months = ppm >= 46 ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] : ppm >= 15 ? [0, 3, 6, 9] : ppm >= 8 ? [0, 6] : [0];
+    const yearEvery = ppm * 12 < 60 ? 2 : 1;
+    for (let yy = dt(x0).getUTCFullYear(); yy <= dt(x1).getUTCFullYear(); yy++) {
+      for (const mo of months) {
+        const d = Math.floor(Date.UTC(yy, mo, 1) / DAY);
+        if (d < x0 || d > x1) continue;
+        const label = mo === 0 ? (yy % yearEvery === 0 ? String(yy) : '') : months.length === 2 ? '' : MES[mo];
+        out.push({ d, label, major: mo === 0 });
+      }
+    }
+    return out;
+  }
 
   function drawRace() {
     if (!run) return;
     const { ctx, w, h } = fitCanvas(raceCv), c = palette();
-    const narrow = w < 560;
-    const L = narrow ? 38 : 48, R = narrow ? 14 : 22, T = 26, B = 28;
-    const yMinRaw = Math.min(...HIST.map((hs) => { const f = hs.find((x) => x[0] >= VIEW_START); return f ? f[1] : 900; }));
-    const yMin = Math.floor((yMinRaw - 10) / 50) * 50, yMax = 1012;
-    const x = (d) => L + ((d - VIEW_START) / (viewEnd - VIEW_START)) * (w - L - R);
-    const y = (v) => T + (1 - (v - yMin) / (yMax - yMin)) * (h - T - B);
-    raceGeom = { L, R, T, B, w, h, x, y, yMin, yMax };
-    ctx.font = `500 12px ${c.font}`;
-    ctx.textBaseline = 'middle';
+    const narrow = w < 560, now = performance.now();
+    const L = narrow ? 38 : 48, R = narrow ? 14 : 22, T = 54, B = 28, HEAD = 24;
+    const { x0, x1 } = view || fullView();
+    const plotW = w - L - R, plotH = h - T - B;
+    const yMin = fitY(x0), yMax = 1000 + (HEAD / (plotH - HEAD)) * (1000 - yMin);
+    const x = (d) => L + ((d - x0) / (x1 - x0)) * plotW;
+    const y = (v) => T + (1 - (v - yMin) / (yMax - yMin)) * plotH;
+    raceGeom = { L, R, T, B, w, h, x0, x1 };
+    const inX = (px) => px >= L - 0.5 && px <= w - R + 0.5;
 
     // grade
-    ctx.strokeStyle = c.grid; ctx.lineWidth = 1; ctx.fillStyle = c.muted;
-    for (let v = yMin; v <= 1000; v += 50) {
-      ctx.beginPath(); ctx.moveTo(L, Math.round(y(v)) + 0.5); ctx.lineTo(w - R, Math.round(y(v)) + 0.5); ctx.stroke();
+    ctx.font = `500 12px ${c.font}`; ctx.textBaseline = 'middle'; ctx.lineWidth = 1;
+    const step = yStep(1000 - yMin, plotH - HEAD);
+    for (let v = Math.ceil(yMin / step) * step; v <= 1000; v += step) {
+      ctx.strokeStyle = c.grid; ctx.beginPath(); ctx.moveTo(L, Math.round(y(v)) + 0.5); ctx.lineTo(w - R, Math.round(y(v)) + 0.5); ctx.stroke();
+      ctx.fillStyle = v === 1000 ? c.gold : c.muted; ctx.font = v === 1000 ? `800 14px ${c.display}` : `500 12px ${c.font}`;
       ctx.textAlign = 'right'; ctx.fillText(String(v), L - 8, y(v));
     }
-    const y0 = dt(VIEW_START).getUTCFullYear(), y1 = dt(viewEnd).getUTCFullYear();
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    for (let yy = y0; yy <= y1 + 1; yy++) {
-      const d = yearStart(yy);
-      if (d < VIEW_START || d > viewEnd) continue;
-      const px = Math.round(x(d)) + 0.5;
-      ctx.strokeStyle = c.grid; ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, h - B); ctx.stroke();
-      if (!narrow || yy % 2 === 0) { ctx.fillStyle = c.muted; ctx.fillText(String(yy), px, h - B + 8); }
+    let lastLab = -1e9;
+    for (const tk of xTicks(x0, x1, plotW)) {
+      const px = Math.round(x(tk.d)) + 0.5;
+      ctx.strokeStyle = c.grid; ctx.globalAlpha = tk.major ? 1 : 0.55;
+      ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, h - B); ctx.stroke(); ctx.globalAlpha = 1;
+      if (tk.label && px - lastLab > 34) { ctx.fillStyle = tk.major ? c.fg : c.muted; ctx.font = `${tk.major ? 600 : 500} 12px ${c.font}`; ctx.fillText(tk.label, px, h - B + 8); lastLab = px; }
     }
 
-    // projeções, recortadas pela varredura
-    const clipTo = sweepDay === NEVER ? viewEnd : Math.min(viewEnd, sweepDay);
+    // tudo que é dado fica preso à área do gráfico
+    ctx.save();
+    ctx.beginPath(); ctx.rect(L, T, plotW, plotH); ctx.clip();
+
+    // projeções, reveladas pela varredura
+    const clipTo = sweepDay === NEVER ? x1 : Math.min(x1, sweepDay);
     ctx.save();
     ctx.beginPath(); ctx.rect(x(TODAY), 0, Math.max(0, x(clipTo) - x(TODAY)), h); ctx.clip();
     if (fan) fan.forEach((rows, pi) => {
       ctx.fillStyle = rgba(c.p[pi], 0.13);
       ctx.beginPath(); ctx.moveTo(x(TODAY), y(START[pi]));
-      const vis = rows.filter((r) => r.d <= viewEnd);
+      const vis = []; for (const r of rows) { vis.push(r); if (r.d > x1) break; }
       vis.forEach((r) => ctx.lineTo(x(r.d), y(r.p90)));
       for (let i = vis.length - 1; i >= 0; i--) ctx.lineTo(x(vis[i].d), y(vis[i].p10));
       ctx.closePath(); ctx.fill();
@@ -296,32 +407,43 @@
     run.paths.forEach((paths, pi) => {
       ctx.strokeStyle = rgba(c.p[pi], 0.16); ctx.lineWidth = 1;
       const fx = FX[pi];
+      ctx.beginPath();
       paths.forEach((path) => {
-        ctx.beginPath();
-        let px = x(TODAY), py = y(path[0][1]);
-        ctx.moveTo(px, py);
+        let py = y(path[0][1]);
+        ctx.moveTo(x(TODAY), py);
         for (let j = 1; j < path.length; j++) {
-          const nx = x(fx[path[j][0]]), ny = y(Math.min(path[j][1], 1000));
-          ctx.lineTo(nx, py); ctx.lineTo(nx, ny); px = nx; py = ny;
+          const d = fx[path[j][0]], nx = x(d), ny = y(Math.min(path[j][1], 1000));
+          ctx.lineTo(nx, py); ctx.lineTo(nx, ny); py = ny;
+          if (d > clipTo) break;
         }
-        ctx.stroke();
       });
-    });
-    if (fan) fan.forEach((rows, pi) => {
-      ctx.strokeStyle = c.p[pi]; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x(TODAY), y(START[pi]));
-      for (const r of rows) { if (r.d > viewEnd) break; ctx.lineTo(x(r.d), y(r.p50)); if (r.p50 >= 1000) break; }
       ctx.stroke();
     });
-    // milésimos simulados: um ponto por simulação, na linha dos 1000
-    const nDots = Math.min(run.done, 1500);
+    if (fan) fan.forEach((rows, pi) => {
+      ctx.strokeStyle = c.p[pi]; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+      ctx.beginPath(); ctx.moveTo(x(TODAY), y(START[pi]));
+      for (const r of rows) { ctx.lineTo(x(r.d), y(Math.min(r.p50, 1000))); if (r.p50 >= 1000 || r.d > clipTo) break; }
+      ctx.stroke();
+    });
+    // milésimos simulados: um ponto por simulação na faixa acima dos 1000; os que acabaram de acontecer acendem
+    const nDots = Math.min(run.done, 1500), popD = Math.max(5, 0.012 * (x1 - x0));
     for (let pi = 0; pi < 2; pi++) {
-      ctx.fillStyle = rgba(c.p[pi], 0.22);
+      const hot = [];
+      ctx.fillStyle = rgba(c.p[pi], 0.24);
+      ctx.beginPath();
       for (let i = 0; i < nDots; i++) {
         const d = run.reachDay[pi][i];
-        if (d === NEVER || d > viewEnd) continue;
+        if (d === NEVER || d < x0 || d > x1) continue;
         const jitter = (((i * 2654435761) >>> 0) % 1000) / 1000 - 0.5;
-        ctx.beginPath(); ctx.arc(x(d), y(1000) - 9 + jitter * 10 + (pi ? -2 : 2), 1.8, 0, Math.PI * 2); ctx.fill();
+        const px = x(d), py = y(1000) - HEAD / 2 + jitter * 12 + (pi ? -2 : 2);
+        if (sweepDay !== NEVER && d > sweepDay - popD) { hot.push([px, py]); continue; }
+        ctx.moveTo(px + 1.8, py); ctx.arc(px, py, 1.8, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      if (hot.length) {
+        ctx.fillStyle = rgba(c.p[pi], 0.9); ctx.beginPath();
+        hot.forEach(([px, py]) => { ctx.moveTo(px + 3.4, py); ctx.arc(px, py, 3.4, 0, Math.PI * 2); });
+        ctx.fill();
       }
     }
     ctx.restore();
@@ -329,17 +451,16 @@
     // linha dos 1000
     ctx.strokeStyle = c.gold; ctx.lineWidth = 1.5; ctx.setLineDash([6, 5]);
     ctx.beginPath(); ctx.moveTo(L, y(1000)); ctx.lineTo(w - R, y(1000)); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = c.gold; ctx.font = `800 14px ${c.display}`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-    ctx.fillText('1000', L + 6, y(1000) - 4);
 
     // histórico real
     HIST.forEach((hs, pi) => {
+      if (x0 >= TODAY) return;
       ctx.strokeStyle = c.p[pi]; ctx.lineWidth = 2.25; ctx.lineJoin = 'round';
       ctx.beginPath();
       let started = false, prevY = null;
       for (const [d, v] of hs) {
-        if (d < VIEW_START) { prevY = v; continue; }
-        if (!started) { ctx.moveTo(x(VIEW_START), y(prevY == null ? v : prevY)); started = true; }
+        if (d < x0) { prevY = v; continue; }
+        if (!started) { ctx.moveTo(x(x0), y(prevY == null ? v : prevY)); started = true; }
         ctx.lineTo(x(d), y(prevY == null ? v : prevY)); ctx.lineTo(x(d), y(v)); prevY = v;
       }
       ctx.lineTo(x(TODAY), y(prevY)); ctx.stroke();
@@ -347,43 +468,161 @@
 
     // hoje
     const tx = Math.round(x(TODAY)) + 0.5;
-    ctx.strokeStyle = c.muted; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
-    ctx.beginPath(); ctx.moveTo(tx, T - 6); ctx.lineTo(tx, h - B); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = c.muted; ctx.font = `600 12px ${c.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-    ctx.fillText('hoje', tx, T - 8);
-
-    // rótulos diretos logo à direita de hoje, abaixo do ponto de partida de cada um (área sem trajetórias)
-    ctx.font = `700 13px ${c.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    for (let pi = 0; pi < 2; pi++) {
-      const ly = y(START[pi]) + 16;
-      ctx.fillStyle = c.p[pi]; ctx.fillRect(tx + 8, ly - 4, 8, 8);
-      ctx.fillStyle = c.fg; ctx.fillText(`${NAMES[pi]} ${START[pi]}`, tx + 21, ly);
+    if (inX(tx)) {
+      ctx.strokeStyle = c.muted; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.moveTo(tx, T); ctx.lineTo(tx, h - B); ctx.stroke(); ctx.setLineDash([]);
+    }
+    // rótulos diretos à direita de hoje, abaixo do ponto de partida (na animação, quem leva o nome é a cabeça da corrida)
+    if (sweepDay === NEVER && inX(tx) && tx < w - R - 80) {
+      ctx.font = `700 13px ${c.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      for (let pi = 0; pi < 2; pi++) {
+        const ly = y(START[pi]) + 16;
+        ctx.fillStyle = c.p[pi]; ctx.fillRect(tx + 8, ly - 4, 8, 8);
+        ctx.fillStyle = c.fg; ctx.fillText(`${NAMES[pi]} ${START[pi]}`, tx + 21, ly);
+      }
     }
 
-    // cursor da varredura
-    if (sweepDay !== NEVER && sweepDay > TODAY) {
-      const sx = x(Math.min(sweepDay, viewEnd));
+    // seleção de zoom
+    if (brush && brush.b != null) {
+      const a = Math.max(L, Math.min(brush.a, brush.b)), b = Math.min(w - R, Math.max(brush.a, brush.b));
+      ctx.fillStyle = rgba(c.fg, 0.08); ctx.fillRect(a, T, b - a, plotH);
       ctx.strokeStyle = c.fg; ctx.globalAlpha = 0.5; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(sx, T); ctx.lineTo(sx, h - B); ctx.stroke(); ctx.globalAlpha = 1;
-      ctx.fillStyle = c.fg; ctx.font = `800 14px ${c.display}`; ctx.textAlign = sx > w - 90 ? 'right' : 'left'; ctx.textBaseline = 'top';
-      ctx.fillText(fmtMonth(sweepDay).toUpperCase(), sx + (sx > w - 90 ? -6 : 6), T + 2);
+      ctx.beginPath(); ctx.moveTo(Math.round(a) + 0.5, T); ctx.lineTo(Math.round(a) + 0.5, h - B); ctx.moveTo(Math.round(b) + 0.5, T); ctx.lineTo(Math.round(b) + 0.5, h - B); ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+
+    // marco do milésimo mediano de cada um: aparece quando o cursor passa por ele
+    const marks = [];
+    if (summary) summary.per.forEach((p, pi) => {
+      if (!p.p50 || p.p50 < x0 || p.p50 > x1 || (sweepDay !== NEVER && sweepDay < p.p50) || !inX(x(p.p50))) return;
+      const mx = x(p.p50), my = y(1000);
+      ctx.strokeStyle = c.gold; ctx.globalAlpha = 0.7; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(Math.round(mx) + 0.5, 22); ctx.lineTo(Math.round(mx) + 0.5, my); ctx.stroke(); ctx.globalAlpha = 1;
+      if (bursts[pi] && now - bursts[pi] < 900) {
+        const k = (now - bursts[pi]) / 900;
+        ctx.strokeStyle = rgba(c.p[pi], 0.85 * (1 - k)); ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(mx, my, 6 + 34 * k, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.fillStyle = c.p[pi]; ctx.strokeStyle = c.surface; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(mx, my, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      marks.push({ pi, mx, text: `${NAMES[pi]} · ${fmtMonth(p.p50)}` });
+    });
+
+    // cabeças da corrida: a mediana de cada um no instante do cursor
+    if (sweepDay !== NEVER && sweepDay > TODAY && fan) {
+      const sx = x(Math.min(sweepDay, x1));
+      const heads = [0, 1].filter((pi) => !(summary.per[pi].p50 && sweepDay >= summary.per[pi].p50))
+        .map((pi) => ({ pi, v: Math.min(1000, fanAt(pi, sweepDay, 'p50')) }));
+      heads.forEach((hd) => { hd.y = y(hd.v); hd.ly = hd.y; });
+      if (heads.length === 2 && Math.abs(heads[0].ly - heads[1].ly) < 18) {
+        const mid = (heads[0].ly + heads[1].ly) / 2, up = heads[0].ly < heads[1].ly ? 0 : 1;
+        heads[up].ly = mid - 9; heads[1 - up].ly = mid + 9;
+      }
+      const right = sx < w - R - 90;
+      heads.forEach((hd) => {
+        ctx.save(); ctx.shadowColor = c.p[hd.pi]; ctx.shadowBlur = 14;
+        ctx.fillStyle = c.p[hd.pi]; ctx.beginPath(); ctx.arc(sx, hd.y, 5.5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        ctx.strokeStyle = c.surface; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx, hd.y, 5.5, 0, Math.PI * 2); ctx.stroke();
+        ctx.font = `700 13px ${c.font}`; ctx.textAlign = right ? 'left' : 'right'; ctx.textBaseline = 'middle';
+        const lx = sx + (right ? 11 : -11), txt = `${NAMES[hd.pi]} ${Math.round(hd.v)}`;
+        ctx.lineJoin = 'round'; ctx.strokeStyle = c.surface; ctx.lineWidth = 4; ctx.strokeText(txt, lx, hd.ly);
+        ctx.fillStyle = c.fg; ctx.fillText(txt, lx, hd.ly);
+      });
+    }
+
+    // rótulos da margem de cima: "1000", hoje, marcos do milésimo e o cursor
+    ctx.textBaseline = 'middle';
+    const topY = 12;
+    const boxes = [];
+    const place = (cx, width) => {
+      let a = Math.max(L, Math.min(w - R - width, cx - width / 2));
+      for (const bx of boxes) if (a < bx[1] + 8 && a + width > bx[0] - 8) a = bx[1] + 8;
+      if (a + width > w - R) a = w - R - width;
+      boxes.push([a, a + width]); return a;
+    };
+    if (inX(tx)) {
+      ctx.font = `600 12px ${c.font}`;
+      const tw = ctx.measureText('hoje').width, a = place(tx, tw);
+      ctx.fillStyle = c.muted; ctx.textAlign = 'left'; ctx.fillText('hoje', a, topY);
+    }
+    marks.sort((m1, m2) => m1.mx - m2.mx).forEach((m) => {
+      ctx.font = `700 12px ${c.font}`;
+      const tw = ctx.measureText(m.text).width + 14, a = place(m.mx, tw);
+      ctx.fillStyle = c.p[m.pi]; ctx.beginPath(); ctx.arc(a + 4, topY, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = c.fg; ctx.textAlign = 'left'; ctx.fillText(m.text, a + 14, topY);
+    });
+
+    // cursor da varredura, com a data numa etiqueta
+    if (sweepDay !== NEVER && sweepDay > TODAY) {
+      const sx = x(Math.min(sweepDay, x1));
+      ctx.strokeStyle = c.fg; ctx.globalAlpha = 0.55; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(sx, T - 5); ctx.lineTo(sx, h - B); ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.font = `800 14px ${c.display}`;
+      const lab = fmtMonth(sweepDay).toUpperCase(), tw = ctx.measureText(lab).width + 16;
+      const a = Math.max(L, Math.min(w - R - tw, sx - tw / 2));
+      ctx.fillStyle = c.fg; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(a, T - 27, tw, 22, 6) : ctx.rect(a, T - 27, tw, 22); ctx.fill();
+      ctx.fillStyle = c.bg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, a + tw / 2, T - 16);
     }
 
     // mira do mouse
-    if (hoverX != null) {
+    if (hoverX != null && !brush) {
       ctx.strokeStyle = c.fg; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(hoverX + 0.5, T); ctx.lineTo(hoverX + 0.5, h - B); ctx.stroke(); ctx.globalAlpha = 1;
     }
   }
 
   function valueAt(hs, d) { let v = null; for (const [dd, vv] of hs) { if (dd > d) break; v = vv; } return v; }
+  const dayAtPx = (px) => { const g = raceGeom; return g.x0 + ((px - g.L) / (g.w - g.L - g.R)) * (g.x1 - g.x0); };
+
+  // ---------- zoom ----------
+  const zoomBtns = document.querySelectorAll('#raceZoom button');
+  function setZoomMode(m) { zoomMode = m; zoomBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.zoom === m))); }
+  // anima a janela de tempo até o alvo; a animação da corrida, se estiver rodando, termina antes
+  function zoomTo(target, mode) {
+    if (!run || !summary) return;
+    if (sweeping || pendingSweep) endSweep();
+    setZoomMode(mode);
+    if (zoomAnim) cancelAnimationFrame(zoomAnim);
+    const from = view || fullView(), t0 = performance.now(), dur = reduceMotion ? 0 : 420;
+    const tick = (now) => {
+      const t = dur ? Math.min(1, (now - t0) / dur) : 1, e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      view = { x0: from.x0 + (target.x0 - from.x0) * e, x1: from.x1 + (target.x1 - from.x1) * e };
+      drawRace();
+      zoomAnim = t < 1 ? requestAnimationFrame(tick) : null;
+    };
+    zoomAnim = requestAnimationFrame(tick);
+  }
+  zoomBtns.forEach((b) => b.addEventListener('click', () => zoomTo(b.dataset.zoom === 'near' ? nearView() : fullView(), b.dataset.zoom)));
+  raceCv.addEventListener('dblclick', () => zoomTo(fullView(), 'all'));
+
+  // arrastar na horizontal seleciona o período para aproximar
+  raceCv.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || !raceGeom || !summary || sweeping) return;
+    const px = ev.clientX - raceCv.getBoundingClientRect().left;
+    if (px < raceGeom.L || px > raceGeom.w - raceGeom.R) return;
+    brush = { a: px, b: null, id: ev.pointerId };
+  });
+  window.addEventListener('pointerup', (ev) => {
+    if (!brush || ev.pointerId !== brush.id) return;
+    const b = brush; brush = null;
+    if (b.b != null && Math.abs(b.b - b.a) >= 10) {
+      let d0 = dayAtPx(Math.min(b.a, b.b)), d1 = dayAtPx(Math.max(b.a, b.b));
+      if (d1 - d0 < 21) { const m = (d0 + d1) / 2; d0 = m - 10.5; d1 = m + 10.5; }
+      zoomTo({ x0: d0, x1: d1 }, 'brush');
+    } else drawRace();
+  });
 
   raceCv.addEventListener('pointermove', (ev) => {
     if (!raceGeom || !run) return;
-    const r = raceCv.getBoundingClientRect(), px = ev.clientX - r.left, g = raceGeom;
-    if (px < g.L || px > g.w - g.R) { hideRaceTip(); return; }
+    const r = raceCv.getBoundingClientRect(), g = raceGeom;
+    const px = Math.max(g.L, Math.min(g.w - g.R, ev.clientX - r.left));
+    if (brush && ev.pointerId === brush.id) {
+      if (brush.b != null || Math.abs(px - brush.a) > 4) { brush.b = px; raceTip.hidden = true; raceCv.setPointerCapture(ev.pointerId); drawRace(); }
+      return;
+    }
+    if (ev.clientX - r.left < g.L || ev.clientX - r.left > g.w - g.R) { hideRaceTip(); return; }
     hoverX = px;
-    const d = Math.round(VIEW_START + ((px - g.L) / (g.w - g.L - g.R)) * (viewEnd - VIEW_START));
+    const d = Math.round(dayAtPx(px));
     let html;
     if (d <= TODAY) {
       html = `<div class="h">${fmtDay(d)} · real</div>` + [0, 1].map((pi) => {
@@ -406,7 +645,8 @@
     if (sweepDay === NEVER) drawRace();
   });
   function hideRaceTip() { hoverX = null; raceTip.hidden = true; if (sweepDay === NEVER) drawRace(); }
-  raceCv.addEventListener('pointerleave', hideRaceTip);
+  raceCv.addEventListener('pointerleave', () => { if (!brush) hideRaceTip(); });
+  raceCv.addEventListener('pointercancel', () => { brush = null; hideRaceTip(); });
 
   // ---------- previsão no placar e cartões ----------
   function renderEta() {
@@ -596,7 +836,7 @@
     ticks += `<text x="0%" y="18" text-anchor="start" style="fill:var(--muted);font:500 12px var(--font-body)">hoje</text>`;
     $('cmpAxis').innerHTML = `<svg aria-hidden="true">${ticks}</svg>`;
     document.querySelectorAll('.cmp-row').forEach((row) => {
-      const go = () => { if (row.dataset.win !== state.win) { selectWindow(row.dataset.win); document.getElementById('corrida').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' }); } };
+      const go = () => { if (row.dataset.win !== state.win) selectWindow(row.dataset.win, true); else focusStage(); };
       row.addEventListener('click', go);
       row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
     });
@@ -762,9 +1002,9 @@
   }
 
   // ---------- controles ----------
-  $('nSims').addEventListener('change', () => { state.nSims = +$('nSims').value; startRun(); });
+  $('nSims').addEventListener('change', () => { state.nSims = +$('nSims').value; startRun({ focus: true }); });
   $('speed').addEventListener('change', () => { state.speed = $('speed').value; });
-  $('rerun').addEventListener('click', () => { state.seed = (Math.random() * 2147483647) | 0; startRun(); });
+  $('rerun').addEventListener('click', () => { state.seed = (Math.random() * 2147483647) | 0; startRun({ focus: true }); });
   [['multMessi', 0], ['multCr7', 1]].forEach(([id, pi]) => {
     const el = $(id);
     el.addEventListener('input', () => { state.mult[pi] = +el.value; $(id + 'V').textContent = '×' + fmtDec(state.mult[pi]); $('adjBadge').hidden = !adjusted(); });
@@ -773,7 +1013,7 @@
   $('resetMult').addEventListener('click', () => {
     state.mult = [1, 1];
     ['multMessi', 'multCr7'].forEach((id) => { $(id).value = '1'; $(id + 'V').textContent = '×1,00'; });
-    startRun();
+    startRun({ focus: true });
   });
 
   // ---------- redesenho ----------
