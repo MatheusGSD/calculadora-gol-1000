@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Corrida ao Gol 1000</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Barlow:wght@400;500;600;700&family=Doto:wght@700;900&display=swap">
+<style>
+/* Layout: placar de estádio no topo (com o veredito), controles logo abaixo, o "campo" (gráficos) no meio e a súmula (replay, método) no fim. Dark-first: noite de jogo. */
+:root {
+  --bg: #0b111c;
+  --surface: #111a2a;
+  --surface-2: #17223a;
+  --line: #24324d;
+  --grid: #1c2840;
+  --fg: #e9eef6;
+  --muted: #8f9cb4;
+  --messi: #4b98e0;
+  --cr7: #ef4f4c;
+  --messi-led: #82c3f6;
+  --cr7-led: #ff6d68;
+  --gold: #e0b84e;
+  --none: #4a5876;
+  --focus: #ffd66b;
+  --font-display: "Big Shoulders Display", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --font-led: "Doto", "Courier New", ui-monospace, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f2f4ef; --surface: #ffffff; --surface-2: #eaeee7; --line: #d3d9d0; --grid: #e6eae3;
+    --fg: #121a26; --muted: #586373; --messi: #1f74c4; --cr7: #c42b2b; --messi-led: #1f74c4; --cr7-led: #c42b2b;
+    --gold: #a87b06; --none: #b7c0cc; --focus: #7a5a00;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f2f4ef; --surface: #ffffff; --surface-2: #eaeee7; --line: #d3d9d0; --grid: #e6eae3;
+  --fg: #121a26; --muted: #586373; --messi: #1f74c4; --cr7: #c42b2b; --messi-led: #1f74c4; --cr7-led: #c42b2b;
+  --gold: #a87b06; --none: #b7c0cc; --focus: #7a5a00;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0b111c; --surface: #111a2a; --surface-2: #17223a; --line: #24324d; --grid: #1c2840;
+  --fg: #e9eef6; --muted: #8f9cb4; --messi: #4b98e0; --cr7: #ef4f4c; --messi-led: #82c3f6; --cr7-led: #ff6d68;
+  --gold: #e0b84e; --none: #4a5876; --focus: #ffd66b;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 16px/1.55 var(--font-body);
+  padding-inline: 16px;
+  padding-block: 0 72px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- Topo: placar ---------- */
+.floodlight { position: relative; padding-block: 28px 8px; }
+.floodlight::before {
+  content: "";
+  position: absolute; inset: -28px -16px auto -16px; height: 380px;
+  background:
+    radial-gradient(ellipse 38% 62% at 14% 0%, color-mix(in srgb, var(--messi) 18%, transparent), transparent 70%),
+    radial-gradient(ellipse 38% 62% at 86% 0%, color-mix(in srgb, var(--cr7) 16%, transparent), transparent 70%);
+  pointer-events: none; z-index: 0;
+}
+.floodlight > * { position: relative; z-index: 1; }
+.topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.eyebrow { font: 600 13px/1.3 var(--font-body); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.icon-btn {
+  appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+  border-radius: 999px; padding: 6px 12px; font: 600 13px/1 var(--font-body); cursor: pointer;
+}
+.icon-btn:hover { border-color: var(--muted); }
+h1 {
+  font: 900 clamp(46px, 8.4vw, 96px)/.88 var(--font-display);
+  letter-spacing: .005em; text-transform: uppercase;
+  margin: 14px 0 12px; text-wrap: balance;
+}
+h1 .k { color: var(--gold); }
+.lede { max-width: 64ch; color: var(--muted); margin: 0; font-size: 17px; }
+.lede strong { color: var(--fg); font-weight: 600; }
+
+.board {
+  margin-top: 24px;
+  display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: stretch;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  padding: 18px 20px;
+}
+.side { display: grid; gap: 4px; min-width: 0; align-content: start; }
+.side.r { text-align: right; }
+.who {
+  font: 800 clamp(20px, 3vw, 28px)/1 var(--font-display); text-transform: uppercase; letter-spacing: .03em;
+  display: flex; align-items: center; gap: 10px;
+}
+.side.r .who { justify-content: flex-end; }
+.chip { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+.chip.m { background: var(--messi); } .chip.c { background: var(--cr7); }
+.led {
+  font: 900 clamp(60px, 11.5vw, 136px)/.95 var(--font-led);
+  font-variant-numeric: tabular-nums; letter-spacing: .02em; margin-block: 4px;
+}
+.led.m { color: var(--messi-led); text-shadow: 0 0 22px color-mix(in srgb, var(--messi-led) 40%, transparent); }
+.led.c { color: var(--cr7-led); text-shadow: 0 0 22px color-mix(in srgb, var(--cr7-led) 40%, transparent); }
+.need { font-size: 15px; color: var(--muted); }
+.need b, .eta b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.eta { font-size: 15px; color: var(--muted); min-height: 1.55em; }
+.vs { display: grid; place-items: center; align-content: center; gap: 6px; padding-inline: 10px; border-inline: 1px dashed var(--line); }
+.vs .t { font: 900 clamp(30px, 4.2vw, 48px)/1 var(--font-led); color: var(--gold); }
+.vs .s { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); text-align: center; }
+
+/* veredito */
+.verdict { margin-top: 14px; display: grid; gap: 10px; }
+.verdict-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.verdict-text { font: 700 clamp(19px, 2.4vw, 24px)/1.25 var(--font-body); margin: 0; text-wrap: balance; max-width: 60ch; }
+.counter { color: var(--muted); font-size: 14px; white-space: nowrap; }
+.bar { position: relative; height: 34px; border-radius: 8px; overflow: hidden; display: flex; background: var(--surface-2); }
+.bar > div { height: 100%; transition: width .18s linear; min-width: 0; }
+.bar .seg-c { background: var(--cr7); }
+.bar .seg-t { background: var(--gold); }
+.bar .seg-n { background: var(--none); }
+.bar .seg-m { background: var(--messi); }
+.bar-labels { display: flex; justify-content: space-between; gap: 12px; font-size: 15px; flex-wrap: wrap; }
+.bar-labels span { display: inline-flex; align-items: center; gap: 8px; }
+.bar-labels b { font-variant-numeric: tabular-nums; }
+.bar-labels .mid { color: var(--muted); font-size: 13px; }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--gold); color: var(--gold); font: 700 12px/1.4 var(--font-body); letter-spacing: .08em; text-transform: uppercase;
+}
+
+/* ---------- Controles ---------- */
+.controls { margin-top: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; gap: 14px; }
+.ctl-label { font: 600 12px/1 var(--font-body); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips button {
+  appearance: none; cursor: pointer; border: 1px solid var(--line); background: var(--surface-2); color: var(--fg);
+  padding: 8px 14px; border-radius: 10px; font: 600 15px/1.1 var(--font-body);
+}
+.chips button:hover { border-color: var(--muted); }
+.chips button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.ctl-row { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: end; }
+.field { display: grid; gap: 6px; }
+.field label, .field .lab { font-size: 13px; color: var(--muted); }
+select, input[type="number"] {
+  font: 500 15px/1.2 var(--font-body); color: var(--fg); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+}
+.btn {
+  appearance: none; cursor: pointer; border: 1px solid var(--fg); background: var(--fg); color: var(--bg);
+  border-radius: 10px; padding: 9px 16px; font: 700 15px/1 var(--font-body);
+}
+.btn.ghost { background: transparent; color: var(--fg); border-color: var(--line); }
+.btn:hover { filter: brightness(1.08); }
+details.whatif { border: 1px dashed var(--line); border-radius: 12px; padding: 10px 14px; }
+details.whatif summary { cursor: pointer; font-weight: 600; }
+.whatif-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px 24px; margin-top: 12px; }
+.slider { display: grid; gap: 4px; }
+.slider .top { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+.slider .top b { font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--fg); }
+#multMessi { accent-color: var(--messi); } #multCr7 { accent-color: var(--cr7); }
+.window-note { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 24px; font-size: 15px; }
+.window-note .desc { color: var(--muted); grid-column: 1 / -1; margin: 0; }
+.wstat { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.wstat .who-s { font: 800 18px/1 var(--font-display); text-transform: uppercase; letter-spacing: .03em; display: inline-flex; align-items: center; gap: 8px; }
+.wstat .v { font-variant-numeric: tabular-nums; }
+.warn { color: var(--gold); font-size: 14px; }
+
+/* recorte livre */
+.custom { display: grid; gap: 8px; }
+.strip-wrap { position: relative; height: 112px; }
+.strip-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dual { position: absolute; left: 0; right: 0; bottom: -2px; height: 24px; }
+.dual input { position: absolute; inset: 0; width: 100%; margin: 0; background: none; pointer-events: none; -webkit-appearance: none; appearance: none; height: 24px; }
+.dual input::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 18px; height: 22px; border-radius: 5px; background: var(--fg); border: 2px solid var(--bg); cursor: ew-resize; }
+.dual input::-moz-range-thumb { pointer-events: auto; width: 16px; height: 20px; border-radius: 5px; background: var(--fg); border: 2px solid var(--bg); cursor: ew-resize; }
+.dual input::-webkit-slider-runnable-track { background: none; }
+.dual input::-moz-range-track { background: none; }
+.custom-read { font-size: 14px; color: var(--muted); }
+.custom-read b { color: var(--fg); font-variant-numeric: tabular-nums; }
+
+/* ---------- Seções ---------- */
+section { padding-block: 40px 4px; }
+h2 { font: 800 clamp(28px, 3.8vw, 40px)/1 var(--font-display); text-transform: uppercase; letter-spacing: .02em; margin: 0 0 8px; text-wrap: balance; }
+h3 { font: 800 20px/1.1 var(--font-display); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
+.sub { color: var(--muted); margin: 0 0 18px; max-width: 72ch; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px; min-width: 0; }
+.chart { position: relative; }
+.chart canvas { display: block; width: 100%; }
+#race { height: 460px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 14px; color: var(--muted); margin-top: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.sw { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+.sw.band { height: 10px; border-radius: 3px; opacity: .45; }
+.sw.dot { width: 8px; height: 8px; border-radius: 50%; }
+.tip {
+  position: absolute; pointer-events: none; z-index: 5; min-width: 180px; max-width: 270px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
+  font-size: 13px; line-height: 1.45; box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+}
+.tip .h { font-weight: 700; margin-bottom: 4px; }
+.tip .r { display: flex; align-items: center; gap: 7px; font-variant-numeric: tabular-nums; }
+.tip .r .chip { width: 9px; height: 9px; }
+.tip .m { color: var(--muted); }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 14px; }
+.kpi { display: grid; gap: 10px; }
+.kpi-head { display: flex; align-items: center; gap: 10px; font: 800 20px/1 var(--font-display); text-transform: uppercase; letter-spacing: .03em; }
+.kpi-main { font: 800 clamp(34px, 4.6vw, 46px)/1 var(--font-display); letter-spacing: .01em; }
+.kpi-sub { color: var(--muted); font-size: 15px; }
+.kpi-sub b { color: var(--fg); font-weight: 600; }
+.toplist { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; }
+.toplist li { display: grid; grid-template-columns: 1fr auto; gap: 10px; border-top: 1px solid var(--line); padding-top: 6px; }
+.toplist .p { font-variant-numeric: tabular-nums; color: var(--muted); }
+
+#hist { height: 300px; }
+.tbl-toggle { margin-top: 10px; }
+.tbl-wrap { overflow-x: auto; margin-top: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* comparativo */
+.cmp { display: grid; gap: 0; }
+.cmp-row {
+  display: grid; grid-template-columns: 190px 1fr 150px; gap: 14px; align-items: center;
+  padding-block: 12px; border-top: 1px solid var(--line); cursor: pointer;
+}
+.cmp-row:first-child { border-top: 0; }
+.cmp-row[aria-current="true"] .cmp-name { color: var(--gold); }
+.cmp-row:hover .cmp-name { text-decoration: underline; }
+.cmp-name { font: 800 19px/1.05 var(--font-display); text-transform: uppercase; letter-spacing: .03em; }
+.cmp-rates { font-size: 13px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.cmp-plot { position: relative; height: 46px; min-width: 0; }
+.cmp-plot svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.cmp-p { text-align: right; font-variant-numeric: tabular-nums; }
+.cmp-p b { font: 800 24px/1 var(--font-display); }
+.cmp-p small { display: block; color: var(--muted); font-size: 12px; }
+.cmp-axis { position: relative; height: 22px; margin-left: 204px; margin-right: 164px; }
+.cmp-axis svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.pending { color: var(--muted); font-size: 13px; }
+
+/* replay */
+.replay-grid { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px; }
+.mini-board { display: grid; gap: 14px; align-content: start; }
+.mini { display: grid; gap: 2px; }
+.mini .led { font-size: clamp(44px, 6vw, 64px); margin: 0; }
+.mini .lam { color: var(--muted); font-size: 14px; }
+.sim-date { font: 800 22px/1 var(--font-display); letter-spacing: .04em; text-transform: uppercase; }
+.replay-ctl { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.feed { height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); padding: 6px 0; }
+.ev { display: grid; grid-template-columns: 82px 12px minmax(0, 1fr) auto 52px; gap: 10px; align-items: center; padding: 6px 12px; font-size: 14px; }
+.ev .d { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ev .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev .t small { color: var(--muted); }
+.ev .g { display: flex; gap: 3px; }
+.ev .g i { width: 9px; height: 9px; border-radius: 50%; background: var(--fg); display: inline-block; }
+.ev .c { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.ev.zero { opacity: .55; }
+.ev.hit { background: color-mix(in srgb, var(--gold) 16%, transparent); }
+.ev.hit .c { color: var(--gold); }
+.banner { border: 1px solid var(--gold); border-radius: 12px; padding: 12px 14px; font-size: 16px; line-height: 1.4; }
+.banner b { color: var(--gold); }
+
+/* método */
+.method { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+.method .wide { grid-column: 1 / -1; }
+.method p, .method li { max-width: 68ch; }
+.method ul { padding-left: 18px; margin: 0; display: grid; gap: 6px; }
+.prose p { margin: 0 0 10px; }
+#hl { height: 170px; }
+.sources a { color: var(--fg); }
+footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
+
+@media (max-width: 760px) {
+  .board { grid-template-columns: 1fr 1fr; padding: 14px; }
+  .vs { grid-column: 1 / -1; grid-row: 2; border-inline: 0; border-top: 1px dashed var(--line); padding-top: 10px; grid-auto-flow: column; gap: 12px; }
+  .vs .s br { display: none; }
+  #race { height: 340px; }
+  #hist { height: 240px; }
+  .cmp-row { grid-template-columns: 1fr auto; }
+  .cmp-row .cmp-plot { grid-column: 1 / -1; grid-row: 2; }
+  .cmp-axis { margin-left: 0; margin-right: 0; }
+  .replay-grid { grid-template-columns: 1fr; }
+  .mini-board { grid-template-columns: 1fr 1fr; }
+  .mini-board .full { grid-column: 1 / -1; }
+  .ev { grid-template-columns: 70px 10px minmax(0, 1fr) auto 44px; gap: 8px; padding-inline: 8px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="floodlight">
+    <div class="topbar">
+      <div class="eyebrow">Simulação Monte Carlo · dados até 10/10/2026</div>
+      <button class="icon-btn" id="themeBtn" type="button">Tema claro</button>
+    </div>
+    <h1>Corrida ao gol <span class="k">1000</span></h1>
+    <p class="lede">Messi marca mais gols por jogo. Cristiano Ronaldo está mais perto. Quem chega primeiro ao <strong>milésimo gol oficial</strong>, e quando? Milhares de temporadas simuladas a partir dos jogos reais de cada um pelo clube.</p>
+
+    <div class="board" aria-label="Placar atual de gols oficiais na carreira">
+      <div class="side">
+        <div class="who"><span class="chip m"></span>Messi</div>
+        <div class="led m num" id="ledMessi">932</div>
+        <div class="need">faltam <b id="needMessi">68</b> · Inter Miami</div>
+        <div class="eta" id="etaMessi"></div>
+      </div>
+      <div class="vs">
+        <div class="t">1000</div>
+        <div class="s">gols oficiais<br>na carreira</div>
+      </div>
+      <div class="side r">
+        <div class="who">Cristiano Ronaldo<span class="chip c"></span></div>
+        <div class="led c num" id="ledCr7">980</div>
+        <div class="need">Al-Nassr · faltam <b id="needCr7">20</b></div>
+        <div class="eta" id="etaCr7"></div>
+      </div>
+    </div>
+
+    <div class="verdict" aria-live="polite">
+      <div class="verdict-head">
+        <p class="verdict-text" id="verdictText">Simulando…</p>
+        <span class="counter" id="simCounter"></span>
+      </div>
+      <div class="bar" id="probBar" role="img" aria-label="Probabilidade de cada um chegar primeiro">
+        <div class="seg-c" id="segC" style="width:0"></div>
+        <div class="seg-t" id="segT" style="width:0"></div>
+        <div class="seg-n" id="segN" style="width:0"></div>
+        <div class="seg-m" id="segM" style="width:0"></div>
+      </div>
+      <div class="bar-labels">
+        <span><span class="chip c"></span>CR7 primeiro <b id="pC">–</b></span>
+        <span class="mid" id="pMid"></span>
+        <span>Messi primeiro <b id="pM">–</b><span class="chip m"></span></span>
+      </div>
+    </div>
+  </header>
+
+  <div class="controls" id="controles">
+    <div>
+      <div class="ctl-label">Recorte usado para o ritmo de gols</div>
+      <div class="chips" id="windowChips" role="group" aria-label="Recorte"></div>
+    </div>
+
+    <div class="custom" id="customBox" hidden>
+      <div class="strip-wrap">
+        <canvas id="strip" aria-label="Gols por jogo de clube desde 2019: Messi acima, CR7 abaixo"></canvas>
+        <div class="dual">
+          <input type="range" id="rangeFrom" aria-label="Início do recorte livre">
+          <input type="range" id="rangeTo" aria-label="Fim do recorte livre">
+        </div>
+      </div>
+      <div class="custom-read" id="customRead"></div>
+    </div>
+
+    <div class="window-note" id="windowNote"></div>
+
+    <div class="ctl-row">
+      <div class="field">
+        <label for="nSims">Simulações</label>
+        <select id="nSims">
+          <option value="1000">1.000</option>
+          <option value="10000" selected>10.000</option>
+          <option value="50000">50.000</option>
+          <option value="100000">100.000</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="speed">Animação</label>
+        <select id="speed">
+          <option value="slow">Lenta</option>
+          <option value="normal" selected>Normal</option>
+          <option value="none">Sem animação</option>
+        </select>
+      </div>
+      <button class="btn" id="rerun" type="button">Rodar de novo</button>
+      <span class="badge" id="adjBadge" hidden>Cenário ajustado</span>
+    </div>
+
+    <details class="whatif" id="whatif">
+      <summary>E se… (ajustar a eficiência)</summary>
+      <div class="whatif-grid">
+        <div class="slider">
+          <div class="top"><label for="multMessi">Eficiência do Messi</label><b id="multMessiV">×1,00</b></div>
+          <input type="range" id="multMessi" min="0.5" max="1.5" step="0.05" value="1">
+        </div>
+        <div class="slider">
+          <div class="top"><label for="multCr7">Eficiência do CR7</label><b id="multCr7V">×1,00</b></div>
+          <input type="range" id="multCr7" min="0.5" max="1.5" step="0.05" value="1">
+        </div>
+        <div><button class="btn ghost" id="resetMult" type="button">Voltar aos dados reais</button></div>
+      </div>
+    </details>
+  </div>
+
+  <section id="corrida">
+    <h2>A corrida</h2>
+    <p class="sub">Contagem real até hoje e, depois da linha de hoje, as trajetórias simuladas jogo a jogo até a linha dos 1000. A faixa marca onde ficam 80% das simulações. Cada ponto sobre a linha dos 1000 é o milésimo gol de uma simulação.</p>
+    <div class="panel">
+      <div class="chart" id="raceWrap">
+        <canvas id="race" role="img" aria-label="Gráfico da corrida: gols na carreira ao longo do tempo, real e simulado"></canvas>
+        <div class="tip" id="raceTip" hidden></div>
+      </div>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--messi)"></span>Messi</span>
+        <span><span class="sw" style="background:var(--cr7)"></span>CR7</span>
+        <span><span class="sw band" style="background:var(--muted)"></span>80% das simulações</span>
+        <span><span class="sw dot" style="background:var(--cr7)"></span><span class="sw dot" style="background:var(--messi);margin-left:-4px"></span>milésimo de uma simulação</span>
+      </div>
+    </div>
+    <div class="kpis" id="kpis"></div>
+  </section>
+
+  <section id="datas">
+    <h2>Quando sai o milésimo</h2>
+    <p class="sub">Em que mês cada simulação chega ao gol 1000. CR7 para cima, Messi para baixo. A linha tracejada marca a mediana de cada um.</p>
+    <div class="panel">
+      <div class="chart" id="histWrap">
+        <canvas id="hist" role="img" aria-label="Distribuição do mês do milésimo gol"></canvas>
+        <div class="tip" id="histTip" hidden></div>
+      </div>
+      <button class="btn ghost tbl-toggle" id="histTblBtn" type="button" aria-expanded="false">Ver em tabela</button>
+      <div class="tbl-wrap" id="histTbl" hidden></div>
+    </div>
+  </section>
+
+  <section id="recortes">
+    <h2>Cada recorte, uma resposta</h2>
+    <p class="sub">A mesma pergunta respondida com o ritmo de cada janela de tempo (4.000 simulações por recorte). A barra vai do 10º ao 90º percentil da data do milésimo e o ponto marca a mediana. Clique num recorte para usá-lo no resto da página.</p>
+    <div class="panel">
+      <div class="cmp" id="cmp"></div>
+      <div class="cmp-axis" id="cmpAxis"></div>
+    </div>
+  </section>
+
+  <section id="replay">
+    <h2>Replay de uma simulação</h2>
+    <p class="sub">Uma das simulações, jogo a jogo, do jeito que o computador sorteou. Cada simulação tem seu número e sempre se repete igual.</p>
+    <div class="panel">
+      <div class="replay-ctl">
+        <div class="field">
+          <label for="simNo">Simulação nº</label>
+          <input type="number" id="simNo" min="1" value="1" style="width:120px">
+        </div>
+        <button class="btn" id="playBtn" type="button">Reproduzir</button>
+        <button class="btn ghost" id="randBtn" type="button">Sortear outra</button>
+        <button class="btn ghost" id="skipBtn" type="button">Pular para o fim</button>
+        <div class="field">
+          <label for="rSpeed">Ritmo</label>
+          <select id="rSpeed">
+            <option value="320">Lento</option>
+            <option value="130" selected>Normal</option>
+            <option value="35">Rápido</option>
+          </select>
+        </div>
+      </div>
+      <div class="replay-grid" style="margin-top:16px">
+        <div class="mini-board">
+          <div class="mini">
+            <div class="who"><span class="chip m"></span>Messi</div>
+            <div class="led m num" id="rMessi">932</div>
+            <div class="lam" id="rLamMessi"></div>
+          </div>
+          <div class="mini">
+            <div class="who"><span class="chip c"></span>CR7</div>
+            <div class="led c num" id="rCr7">980</div>
+            <div class="lam" id="rLamCr7"></div>
+          </div>
+          <div class="full">
+            <div class="ctl-label">Data na simulação</div>
+            <div class="sim-date" id="rDate">10/10/2026</div>
+          </div>
+          <div class="banner full" id="rBanner" hidden></div>
+        </div>
+        <div class="feed" id="feed" aria-live="off"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="metodo">
+    <h2>Método e fontes</h2>
+    <div class="method">
+      <div class="panel prose">
+        <h3>Contagem</h3>
+        <p>Usamos a contagem da imprensa, a mesma de Opta, AFP, AP/ESPN e EFE e do perfil do próprio CR7, que bate jogo a jogo com o messivsronaldo.app: <b class="num">980</b> gols do CR7 e <b class="num">932</b> do Messi em 10/10/2026. O Transfermarkt dá 974 ao CR7 porque não conta os 6 gols da Copa Árabe de Clubes de 2023. Os gols por seleção estão nos totais, mas não entram na projeção: Messi se despediu da Argentina em 06/10/2026 e CR7 está suspenso provisoriamente pela federação portuguesa.</p>
+        <h3>Modelo</h3>
+        <p>Cada simulação sorteia um ritmo de gols por jogo para cada jogador, a partir do recorte escolhido (posteriori Gamma de um modelo Poisson, com priori de Jeffreys). Recorte curto significa ritmo mais incerto. Depois, sorteia os gols de cada jogo futuro do clube, em ordem, até a contagem chegar a 1000. Nos jogos de clube desde a estreia no clube atual, a variância dos gols por jogo fica abaixo da média (<span id="dispTxt"></span>), então a Poisson por jogo não subestima a variação.</p>
+        <p>O <b>ponderado ótimo</b> usa todos os jogos de clube desde jul/2019, com peso que cai pela metade a cada <b id="hlTxt"></b> dias. Testamos meias-vidas de 30 dias a peso igual para tudo, prevendo o total de gols dos 20 jogos seguintes a partir de várias datas desde jan/2024. Esta foi a que errou menos:</p>
+        <div class="chart"><canvas id="hl" role="img" aria-label="Qualidade da previsão por meia-vida"></canvas></div>
+      </div>
+      <div class="panel prose">
+        <h3>Premissas</h3>
+        <ul>
+          <li>Os dois jogam todos os jogos do clube. Sem lesão, descanso ou suspensão.</li>
+          <li>Sem aposentadoria e sem queda de rendimento por idade. O ritmo do recorte vale até o fim.</li>
+          <li>Só jogos garantidos. Entram liga e fase de liga das copas, e mata-mata só quando o clube já está classificado (Copa do Rei, oitavas; Supercopa Saudita, semifinal). Playoffs da MLS, finais e copas ainda não disputadas ficam de fora, então as datas tendem a sair um pouco mais tarde que na vida real.</li>
+          <li>Depois do último jogo com data publicada, o calendário segue o formato de cada liga, sem datas reais: MLS 2027 com temporada curta de 14 jogos (fev a abr), e depois temporadas de 34 jogos de julho a abril; Liga Saudita com 34 rodadas de agosto a maio. Datas FIFA e pausas ficam sem jogos.</li>
+          <li>Simulação que não chega até 2035 conta como "nenhum dos dois".</li>
+        </ul>
+        <div class="sources" style="margin-top:16px">
+        <h3>Fontes</h3>
+          <ul>
+            <li>Jogo a jogo e contagem: <a href="https://www.messivsronaldo.app/" target="_blank" rel="noopener">messivsronaldo.app</a>, conferido com o <a href="https://www.transfermarkt.com/" target="_blank" rel="noopener">Transfermarkt</a>.</li>
+            <li>Calendário: Transfermarkt, ESPN e Wikipedia (temporadas 2026-27 do Al-Nassr e da Champions da Ásia), MLS (playoffs 2026 e mudança de calendário em 2027).</li>
+            <li>Contexto pós-Copa: ESPN, France 24, Al Jazeera, Sky Sports, The National.</li>
+          </ul>
+          <p style="margin-top:10px" id="calTxt"></p>
+        </div>
+      </div>
+      <div class="panel prose wide">
+        <h3>Dados por recorte (jogos de clube)</h3>
+        <div class="tbl-wrap" id="winTbl"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>Dados de 10/10/2026, antes de Inter Miami x D.C. United, que começa à noite. Simulação feita no seu navegador. Nada aqui é previsão oficial.</footer>
+</div>
+<script src="data/data.js"></script>
+<script src="sim.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
