@@ -436,8 +436,10 @@
     } else {
       const age = ageAt(pj.p50), years = (pj.p50 - state.ref) / YEAR;
       $('idade').textContent = `aos ${fmtInt(Math.floor(age))} anos`;
-      const range = pj.early != null && pj.late != null
-        ? ` Com a incerteza do ritmo, entre ${fmtInt(Math.floor(ageAt(pj.early)))} e ${fmtInt(Math.floor(ageAt(pj.late)))} anos (80%).`
+      const ageEarly = pj.early != null ? Math.floor(ageAt(pj.early)) : null, ageLate = pj.late != null ? Math.floor(ageAt(pj.late)) : null;
+      const range = ageEarly != null && ageLate != null
+        ? (ageEarly === ageLate ? ` Mesmo com a incerteza do ritmo, continua aos ${fmtInt(ageEarly)} anos (80%).`
+          : ` Com a incerteza do ritmo, entre ${fmtInt(ageEarly)} e ${fmtInt(ageLate)} anos (80%).`)
         : pj.early != null ? ` Se o ritmo for mais alto, a partir dos ${fmtInt(Math.floor(ageAt(pj.early)))}; se for mais baixo, pode nunca chegar.` : '';
       $('idadeTxt').innerHTML = `O gol 1000 sairia por volta de <strong>${yearOf(pj.p50)}</strong>, ${state.retired ? 'continuando no ritmo do fim da carreira' : 'mantendo o ritmo de hoje'}: ` +
         `${fmtDec(r.q50)} gol por jogo, ${state.gpy} jogos por ano${state.decline ? `, caindo ${fmtDec(state.decline * 100, 0)}% ao ano` : ''}.` + range;
@@ -499,11 +501,26 @@
     }
     return { X, Y };
   }
-  function vline(ctx, X, d, label, pad, h, align) {
+  // linha vertical com rótulo no alto, do lado `align`; à esquerda, o rótulo não passa de minX (onde fica o "gol 1000")
+  function vline(ctx, X, d, label, { pad, w, h, align = 'right', minX = pad.l }) {
+    const x = X(d);
     ctx.strokeStyle = cssVar('--line'); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(X(d), pad.t); ctx.lineTo(X(d), h - pad.b); ctx.stroke();
-    ctx.fillStyle = cssVar('--muted'); ctx.textAlign = align || 'right'; ctx.textBaseline = 'top'; ctx.font = `12px ${cssVar('--font-body')}`;
-    ctx.fillText(label, X(d) + (align === 'left' ? 4 : -4), pad.t + 2);
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
+    ctx.fillStyle = cssVar('--muted'); ctx.textBaseline = 'top'; ctx.font = `12px ${cssVar('--font-body')}`;
+    const tw = ctx.measureText(label).width;
+    if (align === 'right' && x - 4 - tw < minX) align = 'left';
+    else if (align === 'left' && x + 4 + tw > w - pad.r) {
+      // não cabe à direita (tela estreita): vai para o pé da linha, do lado esquerdo, longe do rótulo de "hoje"
+      ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+      return haloText(ctx, label, x - 4, h - pad.b - 2);
+    }
+    ctx.textAlign = align;
+    ctx.fillText(label, x + (align === 'left' ? 4 : -4), pad.t + 2);
+  }
+  // texto com contorno da cor do cartão, para continuar legível sobre linhas e faixas
+  function haloText(ctx, text, x, y) {
+    ctx.save(); ctx.strokeStyle = cssVar('--surface'); ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeText(text, x, y); ctx.restore();
+    ctx.fillText(text, x, y);
   }
 
   function drawCareer() {
@@ -512,10 +529,18 @@
     // o eixo vai até o gol 1000 projetado, se ele cair antes dos 100 anos; senão para 15 anos depois do ponto de partida
     const end = state.retired ? state.end + 2 * YEAR : state.retireDay;
     const projVisible = pj.p50 != null && ageAt(pj.p50) <= 100;
-    const x0 = blocks[0].from - 120, x1 = Math.max(end, projVisible ? pj.p50 : state.ref + 15 * YEAR) + 120;
+    const projMark = projVisible && state.total < 1000;
+    const retireLabel = `aposenta aos ${state.retireAge}`, projLabel = projMark ? `aos ${Math.floor(ageAt(pj.p50))} anos` : '';
+    const pad = { l: 46, r: 14, t: 12, b: 26 }, plotW = w - pad.l - pad.r, font = cssVar('--font-body');
+    const x0 = blocks[0].from - 120;
+    // fim do eixo que deixa `px` pixels livres à direita da data d (no máximo um quarto do gráfico)
+    const roomFor = (d, px) => x0 + (d - x0) * plotW / Math.max(plotW - px, plotW * 0.75);
+    const textW = (f, t) => { ctx.font = `${f}12px ${font}`; return ctx.measureText(t).width; };
+    const x1 = Math.max(Math.max(end, projVisible ? pj.p50 : state.ref + 15 * YEAR) + 120,
+      state.retired ? -Infinity : roomFor(state.retireDay, textW('', retireLabel) + 8),
+      projMark ? roomFor(pj.p50, textW('600 ', projLabel) + 14) : -Infinity);
     const yMax = Math.max(1000, s ? s.finalP90 : 0, state.total) * 1.06;
     const ticks = []; for (let v = 0; v <= yMax; v += yMax > 1200 ? 250 : 200) ticks.push(v);
-    const pad = { l: 46, r: 14, t: 12, b: 26 };
     const { X, Y } = axes(ctx, w, h, pad, x0, x1, 0, yMax, ticks, fmtInt);
     const accent = cssVar('--accent'), gold = cssVar('--gold'), fg = cssVar('--fg'), muted = cssVar('--muted');
     ctx.save(); ctx.beginPath(); ctx.rect(pad.l, 0, w - pad.l - pad.r, h); ctx.clip();
@@ -547,12 +572,14 @@
     ctx.moveTo(X(pts[0]), Y(0));
     for (const d of pts) ctx.lineTo(X(d), Y(cumAtDay(d)));
     ctx.stroke();
-    vline(ctx, X, state.end, state.retired ? 'fim da carreira' : 'hoje', pad, h);
-    if (!state.retired) vline(ctx, X, state.retireDay, `aposenta aos ${state.retireAge}`, pad, h, 'left');
-    if (projVisible && state.total < 1000) {
+    const goalLabelEnd = pad.l + 4 + textW('600 ', 'gol 1000') + 8;
+    vline(ctx, X, state.end, state.retired ? 'fim da carreira' : 'hoje', { pad, w, h, minX: goalLabelEnd });
+    if (!state.retired) vline(ctx, X, state.retireDay, retireLabel, { pad, w, h, align: 'left' });
+    if (projMark) {
       ctx.strokeStyle = gold; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(X(pj.p50), Y(1000), 6, 0, 2 * Math.PI); ctx.stroke();
-      ctx.fillStyle = gold; ctx.textAlign = X(pj.p50) > w - 120 ? 'right' : 'left'; ctx.textBaseline = 'top'; ctx.font = `600 12px ${cssVar('--font-body')}`;
-      ctx.fillText(`aos ${Math.floor(ageAt(pj.p50))} anos`, X(pj.p50) + (ctx.textAlign === 'right' ? -8 : 8), Y(1000) + 6);
+      ctx.fillStyle = gold; ctx.textBaseline = 'top'; ctx.font = `600 12px ${font}`;
+      ctx.textAlign = X(pj.p50) + 8 + ctx.measureText(projLabel).width > w - pad.r ? 'right' : 'left';
+      haloText(ctx, projLabel, X(pj.p50) + (ctx.textAlign === 'right' ? -8 : 8), Y(1000) + 6);
     } else if (state.total < 1000) {
       ctx.fillStyle = muted; ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.font = `600 12px ${cssVar('--font-body')}`;
       ctx.fillText(pj.p50 == null ? 'gol 1000: nunca →' : `gol 1000 só aos ${fmtInt(Math.floor(ageAt(pj.p50)))} anos →`, w - pad.r - 4, Y(1000) + 6);
@@ -563,8 +590,18 @@
       const yv = Math.min(1000, cumAtDay(d));
       ctx.fillStyle = gold; ctx.beginPath(); ctx.arc(X(d), Y(yv), 5, 0, 2 * Math.PI); ctx.fill();
       if (lm && d === dayOf(lm.date)) {
-        ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'; ctx.font = `600 12px ${cssVar('--font-body')}`;
-        ctx.fillText(`gol 1000 contando amistosos (${yearOf(d)})`, X(d) + 8, Y(yv) - 4);
+        // a curva acumulada só sobe, então acima e à esquerda do ponto, ou abaixo e à direita, ela nunca passa
+        const label = `gol 1000 contando amistosos (${yearOf(d)})`, x = X(d), y = Y(yv);
+        ctx.font = `600 12px ${font}`;
+        const tw = ctx.measureText(label).width;
+        if (x - 8 - tw >= pad.l) {
+          ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+          haloText(ctx, label, x - 8, y - 6);
+        } else {
+          ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+          const lines = x + 8 + tw <= w - pad.r ? [label] : ['gol 1000 contando', `amistosos (${yearOf(d)})`];  // tela estreita: duas linhas
+          lines.forEach((t, i) => haloText(ctx, t, x + 8, y + 6 + i * 15));
+        }
       }
     }
     ctx.restore();
