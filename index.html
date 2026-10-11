@@ -94,6 +94,7 @@ h1 .k { color: var(--gold); }
 .lede strong { color: var(--fg); font-weight: 600; }
 
 .board {
+  position: relative;
   margin-top: 18px;
   display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: stretch;
   background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
@@ -119,15 +120,22 @@ h1 .k { color: var(--gold); }
 .eta { font-size: 15px; color: var(--muted); min-height: 1.55em; }
 .vs { display: grid; place-items: center; align-content: center; gap: 6px; padding-inline: 10px; border-inline: 1px dashed var(--line); }
 .vs .t { font: 900 clamp(30px, 4.2vw, 48px)/1 var(--font-led); color: var(--gold); }
-.vs .s { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); text-align: center; }
+.vs .s { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); text-align: center; min-width: 13ch; }
+.vs .s.sim { color: var(--gold); font-weight: 700; }
+/* placar acompanhando a animação: dourado e pulsando quando chega aos 1000; confete por cima de tudo */
+.side .led { justify-self: start; transform-origin: left center; }
+.side.r .led { justify-self: end; transform-origin: right center; }
+.led.hit { color: var(--gold) !important; text-shadow: 0 0 28px color-mix(in srgb, var(--gold) 65%, transparent) !important; }
+.need .hitmsg { color: var(--gold); font-weight: 700; }
+.board-fx { position: absolute; left: -16px; top: -100px; width: calc(100% + 32px); height: calc(100% + 190px); pointer-events: none; z-index: 3; }
 /* tela larga: placar numa faixa só, nome por fora e número por dentro */
 @media (min-width: 1000px) {
   .board { padding: 12px 20px; }
   .side { grid-template-columns: auto 1fr; grid-template-areas: "who led" "need led" "eta led"; column-gap: 20px; row-gap: 2px; align-content: center; align-items: center; }
   .side.r { grid-template-columns: 1fr auto; grid-template-areas: "led who" "led need" "led eta"; }
   .side .who { grid-area: who; } .side .need { grid-area: need; } .side .eta { grid-area: eta; }
-  .side .led { grid-area: led; justify-self: end; font-size: 92px; margin: 0; }
-  .side.r .led { justify-self: start; }
+  .side .led { grid-area: led; justify-self: end; font-size: 92px; margin: 0; transform-origin: right center; }
+  .side.r .led { justify-self: start; transform-origin: left center; }
 }
 
 /* veredito */
@@ -355,20 +363,21 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
     <p class="lede">Messi marca mais gols por jogo; Cristiano Ronaldo está mais perto. Quem chega primeiro ao <strong>milésimo gol oficial</strong>, e quando? Milhares de temporadas simuladas com os jogos reais de cada um pelo clube.</p>
 
     <div class="board" aria-label="Placar atual de gols oficiais na carreira">
+      <canvas class="board-fx" id="boardFx" aria-hidden="true"></canvas>
       <div class="side">
         <div class="who"><span class="chip m"></span>Messi</div>
         <div class="led m num" id="ledMessi">932</div>
-        <div class="need">faltam <b id="needMessi">68</b> · Inter Miami</div>
+        <div class="need" id="needMessi">faltam <b>68</b> · Inter Miami</div>
         <div class="eta" id="etaMessi"></div>
       </div>
       <div class="vs">
         <div class="t">1000</div>
-        <div class="s">gols oficiais<br>na carreira</div>
+        <div class="s" id="vsSub">gols oficiais<br>na carreira</div>
       </div>
       <div class="side r">
         <div class="who">Cristiano Ronaldo<span class="chip c"></span></div>
         <div class="led c num" id="ledCr7">980</div>
-        <div class="need">Al-Nassr · faltam <b id="needCr7">20</b></div>
+        <div class="need" id="needCr7">Al-Nassr · faltam <b>20</b></div>
         <div class="eta" id="etaCr7"></div>
       </div>
     </div>

@@ -151,7 +151,7 @@
     run = S.createRun({ nSims: state.nSims, seed: state.seed, players: playersFor(wp), months: MONTHS, quantileSims: 3000, drawSims: 160 });
     run.wp = wp;
     fan = null; summary = null; firstDays = null; sweepDay = TODAY;
-    sweeping = false; pendingSweep = null; setLive(false); brush = null;
+    sweeping = false; pendingSweep = null; setLive(false); brush = null; boardReal();
     if (zoomAnim) { cancelAnimationFrame(zoomAnim); zoomAnim = null; }
     view = state.speed === 'none' ? null : cameraAt(TODAY);
     $('verdictText').textContent = 'Simulando…';
@@ -204,15 +204,18 @@
       summary.per.forEach((p, pi) => { if (!bursts[pi] && p.p50 && sweepDay >= p.p50) bursts[pi] = now; });
       drawRace();
       sweepVerdict();
-      if (t < 1) requestAnimationFrame(anim); else endSweep();
+      boardFollow(now);
+      if (t < 1) requestAnimationFrame(anim); else endSweep(true);
     };
     requestAnimationFrame(anim);
   }
   let sweeping = false, pendingSweep = null;
-  function endSweep() {
+  // natural: a animação chegou ao fim sozinha (o placar segura a chegada e depois volta ao real); senão, volta na hora
+  function endSweep(natural) {
     sweeping = false; pendingSweep = null; setLive(false); sweepDay = NEVER;
     view = fullView(); setZoomMode('all');
     drawRace(); finalVerdict();
+    if (natural) { brd.returnAt = performance.now() + 2600; startBoardLoop(); } else boardReal();
   }
   const setLive = (on) => $('stage').classList.toggle('live', on);
   // aba escondida não roda requestAnimationFrame: mostra o resultado final direto
@@ -647,6 +650,109 @@
   function hideRaceTip() { hoverX = null; raceTip.hidden = true; if (sweepDay === NEVER) drawRace(); }
   raceCv.addEventListener('pointerleave', () => { if (!brush) hideRaceTip(); });
   raceCv.addEventListener('pointercancel', () => { brush = null; hideRaceTip(); });
+
+  // ---------- placar acompanha a corrida ----------
+  // na animação, o placar mostra a mediana do recorte na data do cursor; nos 1000, comemora; no fim, volta à contagem real.
+  // tudo anda pelo relógio de requestAnimationFrame, então a gravação quadro a quadro sai igual à tela
+  const LEDS = [$('ledMessi'), $('ledCr7')], NEEDS = [$('needMessi'), $('needCr7')], fxCv = $('boardFx');
+  const CLUBS = P.map((p) => p.club);
+  const brd = { val: START.slice(), hit: [0, 0], parts: [], returnAt: 0, from: null, raf: 0, month: '' };
+  const needHtml = (pi, v) => (pi ? `${CLUBS[1]} · faltam <b>${1000 - v}</b>` : `faltam <b>${1000 - v}</b> · ${CLUBS[0]}`);
+  function setLed(pi, v) {
+    if (brd.val[pi] === v) return;
+    brd.val[pi] = v; LEDS[pi].textContent = String(v);
+    if (!brd.hit[pi]) NEEDS[pi].innerHTML = needHtml(pi, v);
+  }
+  function setVs(month) {
+    if (brd.month === month) return;
+    brd.month = month;
+    $('vsSub').innerHTML = month ? `na simulação<br>${month}` : 'gols oficiais<br>na carreira';
+    $('vsSub').classList.toggle('sim', !!month);
+  }
+  function boardReal() {
+    brd.hit = [0, 0]; brd.parts = []; brd.returnAt = 0; brd.from = null;
+    [0, 1].forEach((pi) => { LEDS[pi].classList.remove('hit'); LEDS[pi].style.transform = ''; brd.val[pi] = -1; setLed(pi, START[pi]); });
+    setVs('');
+    fitCanvas(fxCv);
+  }
+  function boardFollow(now) {
+    setVs(fmtMonth(sweepDay));
+    summary.per.forEach((p, pi) => {
+      if (p.p50 && sweepDay >= p.p50) { if (!brd.hit[pi]) celebrate(pi, p.p50, now); }
+      else setLed(pi, Math.min(999, Math.round(fanAt(pi, sweepDay, 'p50'))));
+    });
+    boardFx(now);
+  }
+  function celebrate(pi, day, now) {
+    setLed(pi, 1000);
+    brd.hit[pi] = now;
+    LEDS[pi].classList.add('hit');
+    NEEDS[pi].innerHTML = `<span class="hitmsg">milésimo em ${fmtMonth(day)}</span>`;
+    // confete saindo do número, com sorteio fixo para a cena se repetir igual
+    const cr = fxCv.getBoundingClientRect(), lr = LEDS[pi].getBoundingClientRect();
+    const cx = lr.left + lr.width / 2 - cr.left, cy = lr.top + lr.height / 2 - cr.top;
+    let seed = (pi + 1) * 7919 + day;
+    const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+    const cols = [cssVar(COLOR_VARS[pi]), cssVar('--gold'), cssVar('--fg')];
+    for (let i = 0; i < 120; i++) {
+      const a = -Math.PI / 2 + (rnd() - 0.5) * Math.PI * 1.6, sp = 160 + rnd() * 380;
+      brd.parts.push({ t0: now, x: cx + (rnd() - 0.5) * lr.width * 0.7, y: cy + (rnd() - 0.5) * lr.height * 0.5,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, rot: rnd() * 6.3, vr: (rnd() - 0.5) * 16,
+        w: 5 + rnd() * 6, h: 2.5 + rnd() * 3, c: cols[Math.floor(rnd() * 3)], life: 1500 + rnd() * 1000 });
+    }
+    brd.glow = brd.glow || [];
+    brd.glow[pi] = { cx, cy, c: cols[0] };
+  }
+  function boardFx(now) {
+    const { ctx } = fitCanvas(fxCv);
+    for (let pi = 0; pi < 2; pi++) {
+      if (!brd.hit[pi]) continue;
+      const k = (now - brd.hit[pi]) / 1300;
+      // número dá um pulo
+      const kp = Math.min(1, (now - brd.hit[pi]) / 650);
+      LEDS[pi].style.transform = kp < 1 ? `scale(${(1 + 0.16 * Math.sin(Math.PI * kp)).toFixed(4)})` : '';
+      if (k >= 1 || !brd.glow || !brd.glow[pi]) continue;
+      const g = brd.glow[pi];
+      // brilho na cor do jogador e um anel dourado abrindo
+      const rad = ctx.createRadialGradient(g.cx, g.cy, 0, g.cx, g.cy, 170);
+      rad.addColorStop(0, rgba(g.c, 0.5 * (1 - k) * (1 - k))); rad.addColorStop(1, rgba(g.c, 0));
+      ctx.fillStyle = rad; ctx.fillRect(g.cx - 170, g.cy - 170, 340, 340);
+      ctx.strokeStyle = rgba(cssVar('--gold'), 0.9 * (1 - k)); ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(g.cx, g.cy, 30 + 150 * k, 0, Math.PI * 2); ctx.stroke();
+    }
+    brd.parts = brd.parts.filter((p) => now - p.t0 < p.life);
+    for (const p of brd.parts) {
+      const t = (now - p.t0) / 1000, k = (now - p.t0) / p.life;
+      ctx.save();
+      ctx.translate(p.x + p.vx * t, p.y + p.vy * t + 0.5 * 820 * t * t);
+      ctx.rotate(p.rot + p.vr * t);
+      ctx.globalAlpha = k < 0.65 ? 1 : 1 - (k - 0.65) / 0.35;
+      ctx.fillStyle = p.c; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    // volta para a contagem real depois de um tempo parado na chegada
+    if (brd.returnAt && now >= brd.returnAt) {
+      if (!brd.from) {
+        brd.from = brd.val.slice(); brd.hit = [0, 0];
+        LEDS.forEach((el) => { el.classList.remove('hit'); el.style.transform = ''; });
+        setVs('');
+      }
+      const k = Math.min(1, (now - brd.returnAt) / 900), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      [0, 1].forEach((pi) => { const v = Math.round(brd.from[pi] + (START[pi] - brd.from[pi]) * e); brd.val[pi] = -1; setLed(pi, v); });
+      if (k >= 1) boardReal();
+    }
+  }
+  const boardBusy = (now) => brd.parts.length > 0 || brd.returnAt > 0 || brd.hit.some((h) => h && now - h < 1300);
+  function startBoardLoop() {
+    if (brd.raf) return;
+    const loop = (now) => {
+      brd.raf = 0;
+      if (sweeping) return; // durante a animação quem desenha é a varredura
+      boardFx(now);
+      if (boardBusy(now)) brd.raf = requestAnimationFrame(loop);
+    };
+    brd.raf = requestAnimationFrame(loop);
+  }
 
   // ---------- previsão no placar e cartões ----------
   function renderEta() {
