@@ -1,8 +1,10 @@
 """Gera data/data.json e data/data.js para a página "Corrida ao Gol 1000".
 
 Entradas (data/sources/):
-  mvr_<p>_pd.json  histórico jogo a jogo do messivsronaldo.app (mesma contagem da imprensa: 980 CR7 / 932 Messi)
-  fixtures.csv     jogos futuros levantados em 10/10/2026 (Transfermarkt, ESPN, Wikipedia)
+  mvr_<p>_pd.json  histórico jogo a jogo do messivsronaldo.app (mesma contagem da imprensa); --baixar troca pelos de agora
+  fixtures.csv     jogos futuros levantados em 10/10/2026 (Transfermarkt, ESPN, Wikipedia), editado à mão
+
+A montagem fica em build(), que o tools/servidor.py também chama com o histórico baixado na hora (/api/corrida).
 
 Regras combinadas com o usuário:
   - só jogos de clube entram no ritmo e no calendário futuro (gols por seleção contam só no total da carreira);
@@ -10,20 +12,26 @@ Regras combinadas com o usuário:
   - calendário futuro só com jogos garantidos: liga e fase de liga/grupos; mata-mata só quando o clube
     já está classificado para aquela fase. Temporadas sem tabela publicada recebem só os jogos de liga.
 
-Uso:  python -I tools/build_data.py
+Uso:  python -I tools/build_data.py            (refaz data.js com os arquivos de data/sources)
+      python -I tools/build_data.py --baixar   (baixa o histórico de agora do messivsronaldo.app antes)
 """
 import csv
 import json
 import math
 import os
 import re
+import sys
+import urllib.request
 from datetime import date, timedelta
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, 'data', 'sources')
 OUT = os.path.join(ROOT, 'data')
 
-AS_OF = '2026-10-10'
+# histórico jogo a jogo do messivsronaldo.app: o JSON que o próprio site carrega (Gatsby). Não é API documentada.
+MVR_URL = 'https://www.messivsronaldo.app/page-data/match-histories/{}-match-history/page-data.json'
+MVR_SLUG = {'messi': 'messi', 'cr7': 'ronaldo'}
+SNAPSHOT_AS_OF = '2026-10-10'  # data da primeira coleta, cujos arquivos não trazem "baixadoEm"
 NT = {'Argentina', 'Portugal'}
 CLUB_FROM = '2019-07-01'   # início dos jogos de clube usados no ritmo (recorte livre e ponderado)
 HIST_FROM = '2022-07-01'   # início da linha real no gráfico da corrida
@@ -48,8 +56,17 @@ def d(s):
     return date.fromisoformat(s)
 
 
-def load_mvr(p):
-    raw = json.load(open(os.path.join(SRC, f'mvr_{p}_pd.json'), encoding='utf-8'))
+def br(s):
+    return f'{s[8:10]}/{s[5:7]}/{s[:4]}'
+
+
+def download_mvr(p, timeout=40):
+    req = urllib.request.Request(MVR_URL.format(MVR_SLUG[p]), headers={'User-Agent': 'Mozilla/5.0 gol1000'})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def parse_mvr(raw):
     key = next(iter(raw['result']['data']))
     rows = []
     for e in raw['result']['data'][key]['edges']:
@@ -65,8 +82,7 @@ def load_mvr(p):
     return rows
 
 
-def history(rows, total):
-    assert sum(r['goals'] for r in rows) == total, 'contagem jogo a jogo não fecha com o total'
+def history(rows):
     cum, out = 0, []
     for r in rows:
         cum += r['goals']
@@ -98,11 +114,12 @@ FX_COMP_PT = {
 }
 
 
-def real_fixtures(team):
+def real_fixtures(team, after):
+    """Jogos garantidos do clube depois de `after` (os de antes já estão no histórico, ou já passaram)."""
     out = []
     with open(os.path.join(SRC, 'fixtures.csv'), encoding='utf-8') as f:
         for r in csv.DictReader(f):
-            if r['team'] != team or r['competition'] not in GUARANTEED[team] or not r['date']:
+            if r['team'] != team or r['competition'] not in GUARANTEED[team] or not r['date'] or r['date'] <= after:
                 continue
             opp = re.sub(r'\s+(FC|SC|SFC|Club)$', '', r['opponent'])
             if opp.startswith('TBD'):
@@ -185,30 +202,34 @@ def score_half_life(matches, h, eval_from, block=20, stride=3):
     return total, n_orig
 
 
-def main():
+def build(raws, as_of, log=lambda *a: None):
+    """Monta os dados da página a partir do histórico do messivsronaldo.app (raws[p], JSON como o site entrega)."""
     players = {}
     meta = {
-        'messi': {'name': 'Lionel Messi', 'short': 'Messi', 'club': 'Inter Miami', 'total': 932},
-        'cr7': {'name': 'Cristiano Ronaldo', 'short': 'CR7', 'club': 'Al-Nassr', 'total': 980},
+        'messi': {'name': 'Lionel Messi', 'short': 'Messi', 'club': 'Inter Miami'},
+        'cr7': {'name': 'Cristiano Ronaldo', 'short': 'CR7', 'club': 'Al-Nassr'},
     }
+    yesterday = (d(as_of) - timedelta(days=1)).isoformat()
     clubs = {}
     for p in ('messi', 'cr7'):
-        rows = load_mvr(p)
-        start, hist = history(rows, meta[p]['total'])
+        rows = [r for r in parse_mvr(raws[p]) if r['date'] <= as_of]
+        total = sum(r['goals'] for r in rows)
+        start, hist = history(rows)
         clubs[p] = club_matches(rows)
         team = meta[p]['club']
-        fx_real = real_fixtures(team)
+        # o calendário começa depois do último jogo registrado e nunca antes de hoje
+        fx_real = real_fixtures(team, max(clubs[p][-1][0], yesterday))
         fx_syn = synthetic_miami() if p == 'messi' else synthetic_nassr()
-        last_real = fx_real[-1][0]
+        last_real = fx_real[-1][0] if fx_real else as_of
         fx = fx_real + [x for x in fx_syn if x[0] > last_real]
         debut = next(m[0] for m in clubs[p] if m[4] == team)
         g = [m[1] for m in clubs[p] if m[0] >= debut]
         mean = sum(g) / len(g)
         var = sum((x - mean) ** 2 for x in g) / (len(g) - 1)
-        players[p] = dict(meta[p], histStart=start, history=hist, club_matches=clubs[p], fixtures=fx,
+        players[p] = dict(meta[p], total=total, histStart=start, history=hist, club_matches=clubs[p], fixtures=fx,
                           debut=debut, dispersion=round(var / mean, 3))
-        print(p, 'total', meta[p]['total'], 'jogos de clube desde', CLUB_FROM, len(clubs[p]), 'estreia', debut,
-              'jogos futuros reais', len(fx_real), 'sintéticos', len(fx) - len(fx_real), 'var/média', round(var / mean, 2))
+        log(p, 'total', total, 'último jogo', rows[-1]['date'], 'jogos de clube desde', CLUB_FROM, len(clubs[p]), 'estreia', debut,
+            'jogos futuros reais', len(fx_real), 'sintéticos', len(fx) - len(fx_real), 'var/média', round(var / mean, 2))
 
     # meia-vida comum aos dois, escolhida pelo melhor log-score fora da amostra
     eval_from = '2024-01-01'
@@ -218,32 +239,48 @@ def main():
         s1, n1 = score_half_life(clubs['messi'], h, eval_from)
         s2, n2 = score_half_life(clubs['cr7'], h, eval_from)
         scores.append([h if h else 0, round(s1 + s2, 3), round(s1, 3), round(s2, 3)])
-        print('meia-vida', h, 'log-score', round(s1 + s2, 2), '(messi', round(s1, 2), 'cr7', round(s2, 2), ') origens', n1, n2)
+        log('meia-vida', h, 'log-score', round(s1 + s2, 2), '(messi', round(s1, 2), 'cr7', round(s2, 2), ') origens', n1, n2)
     best = max(scores, key=lambda x: x[1])
-    print('melhor meia-vida:', best[0] or 'sem decaimento')
+    log('melhor meia-vida:', best[0] or 'sem decaimento')
 
+    year_ago = shift(as_of, -1)
     windows = [
         {'id': 'ponderado', 'label': 'Ponderado ótimo', 'kind': 'decay', 'halfLife': best[0],
          'desc': f'Todos os jogos de clube desde 2019, com peso que cai pela metade a cada {best[0]} dias. A meia-vida foi a que melhor previu, no passado, os gols dos 20 jogos seguintes.'},
         {'id': 'ultimo_ano', 'label': 'Último ano', 'kind': 'range',
-         'from': {'messi': '2025-10-10', 'cr7': '2025-10-10'}, 'to': AS_OF,
-         'desc': 'Jogos de clube de 10/10/2025 a 10/10/2026.'},
+         'from': {'messi': year_ago, 'cr7': year_ago}, 'to': as_of,
+         'desc': f'Jogos de clube de {br(year_ago)} a {br(as_of)}.'},
         {'id': 'pre_copa', 'label': 'Pré-Copa', 'kind': 'range',
          'from': {'messi': '2025-06-11', 'cr7': '2025-06-11'}, 'to': '2026-06-10',
          'desc': 'Jogos de clube nos 12 meses antes da Copa do Mundo (11/06/2025 a 10/06/2026).'},
         {'id': 'pos_copa', 'label': 'Pós-Copa', 'kind': 'range',
-         'from': {'messi': '2026-07-20', 'cr7': '2026-07-07'}, 'to': AS_OF,
+         'from': {'messi': '2026-07-20', 'cr7': '2026-07-07'}, 'to': as_of,
          'desc': 'Jogos de clube depois da eliminação de cada um na Copa (Portugal caiu em 06/07; a Argentina perdeu a final em 19/07).'},
         {'id': 'era', 'label': 'Era MLS/Arábia', 'kind': 'range',
-         'from': {'messi': players['messi']['debut'], 'cr7': players['cr7']['debut']}, 'to': AS_OF,
+         'from': {'messi': players['messi']['debut'], 'cr7': players['cr7']['debut']}, 'to': as_of,
          'desc': 'Todos os jogos de clube desde a estreia no clube atual (CR7 no Al-Nassr, Messi no Inter Miami).'},
     ]
 
-    data = {
-        'asOf': AS_OF, 'clubFrom': CLUB_FROM, 'players': players, 'windows': windows,
+    return {
+        'asOf': as_of, 'clubFrom': CLUB_FROM, 'players': players, 'windows': windows,
         'halfLifeFit': {'grid': scores, 'best': best[0], 'evalFrom': eval_from, 'block': 20},
         'prior': [A0, B0],
     }
+
+
+def main():
+    raws = {}
+    for p in ('messi', 'cr7'):
+        path = os.path.join(SRC, f'mvr_{p}_pd.json')
+        if '--baixar' in sys.argv[1:]:
+            raws[p] = dict(download_mvr(p), baixadoEm=date.today().isoformat())
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(raws[p], f, ensure_ascii=False, separators=(',', ':'))
+        else:
+            raws[p] = json.load(open(path, encoding='utf-8'))
+    as_of = min(raws[p].get('baixadoEm', SNAPSHOT_AS_OF) for p in raws)
+    print('dados até', as_of)
+    data = build(raws, as_of, log=print)
     with open(os.path.join(OUT, 'data.json'), 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, separators=(',', ':'))
     with open(os.path.join(OUT, 'data.js'), 'w', encoding='utf-8') as f:

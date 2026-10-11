@@ -1,18 +1,18 @@
 # Corrida ao Gol 1000
 
 Simulação Monte Carlo de quem chega primeiro ao milésimo gol oficial: Messi ou Cristiano Ronaldo.
-Dados reais até 10/10/2026.
+Pelo servidor, os dados são os de agora; aberta com dois cliques, vale o último retrato gerado (a data aparece no topo da página).
 
-- `index.html`: abra com dois cliques. As fontes vêm do Google Fonts; o resto funciona offline.
-- `data/data.json` e `data/data.js`: dados usados pela página (o `.js` é o mesmo JSON, para abrir sem servidor).
-- `data/sources/`: dados brutos levantados em 10/10/2026 (histórico jogo a jogo do messivsronaldo.app, calendário, notas).
+- `index.html`: rode `python -I tools/servidor.py` e abra http://localhost:8765/index.html. A página baixa o histórico jogo a jogo de agora do messivsronaldo.app (`/api/corrida`), a mesma contagem da imprensa. O site não libera CORS, por isso o servidor. Aberta com dois cliques, ou publicada como Artifact, a página usa `data/data.js`. As fontes vêm do Google Fonts; o resto funciona offline.
+- `data/data.json` e `data/data.js`: o retrato usado sem servidor (o `.js` é o mesmo JSON, para abrir sem servidor).
+- `data/sources/`: dados brutos (histórico jogo a jogo do messivsronaldo.app, calendário, notas). O calendário e as notas são de 10/10/2026.
 - `sim.js`: motor da simulação. `app.js`: interface e gráficos.
 
 ## Atualizar os dados
 
-1. Troque `data/sources/mvr_messi_pd.json`, `data/sources/mvr_cr7_pd.json` e `data/sources/fixtures.csv` por versões novas.
-2. Ajuste `AS_OF` e os totais (`total`) em `tools/build_data.py`.
-3. Rode `python -I tools/build_data.py` e depois `python -I tools/build_artifact.py` (versão para o Artifact).
+- **Retrato** (versão offline e Artifact): `python -I tools/build_data.py --baixar` baixa o histórico de agora para `data/sources/` e refaz `data/data.js`. Depois, `python -I tools/build_artifact.py` refaz `dist/index.html`.
+- **Calendário futuro** (`data/sources/fixtures.csv`): continua à mão. Os jogos já disputados saem sozinhos, mas jogos novos (mata-mata, temporada seguinte) precisam entrar no arquivo.
+- O endereço do histórico no messivsronaldo.app é o JSON interno do site, que não é documentado e pode mudar sem aviso.
 
 ## Calculadora: gol 1000 de qualquer jogador
 

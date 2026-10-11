@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Corrida ao Gol 1000</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Barlow:wght@400;500;600;700&family=Doto:wght@700;900&display=swap">
@@ -356,7 +357,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 
   <header class="floodlight">
     <div class="topbar">
-      <div class="eyebrow">Simulação Monte Carlo · dados até 10/10/2026</div>
+      <div class="eyebrow">Simulação Monte Carlo · <span id="dataStamp">dados até 10/10/2026</span></div>
       <button class="icon-btn" id="themeBtn" type="button">Tema claro</button>
     </div>
     <h1>Corrida ao gol <span class="k">1000</span></h1>
@@ -561,7 +562,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
     <div class="method">
       <div class="panel prose">
         <h3>Contagem</h3>
-        <p>Usamos a contagem da imprensa, a mesma de Opta, AFP, AP/ESPN e EFE e do perfil do próprio CR7, que bate jogo a jogo com o messivsronaldo.app: <b class="num">980</b> gols do CR7 e <b class="num">932</b> do Messi em 10/10/2026. O Transfermarkt dá 974 ao CR7 porque não conta os 6 gols da Copa Árabe de Clubes de 2023. Os gols por seleção estão nos totais, mas não entram na projeção: Messi se despediu da Argentina em 06/10/2026 e CR7 está suspenso provisoriamente pela federação portuguesa.</p>
+        <p>Usamos a contagem da imprensa, a mesma de Opta, AFP, AP/ESPN e EFE e do perfil do próprio CR7, que bate jogo a jogo com o messivsronaldo.app: <b class="num" id="totCr7">980</b> gols do CR7 e <b class="num" id="totMessi">932</b> do Messi em <span id="totDate">10/10/2026</span>. O Transfermarkt dá 974 ao CR7 porque não conta os 6 gols da Copa Árabe de Clubes de 2023. Os gols por seleção estão nos totais, mas não entram na projeção: Messi se despediu da Argentina em 06/10/2026 e CR7 está suspenso provisoriamente pela federação portuguesa.</p>
         <h3>Modelo</h3>
         <p>Cada simulação sorteia um ritmo de gols por jogo para cada jogador, a partir do recorte escolhido (posteriori Gamma de um modelo Poisson, com priori de Jeffreys). Recorte curto significa ritmo mais incerto. Depois, sorteia os gols de cada jogo futuro do clube, em ordem, até a contagem chegar a 1000. Nos jogos de clube desde a estreia no clube atual, a variância dos gols por jogo fica abaixo da média (<span id="dispTxt"></span>), então a Poisson por jogo não subestima a variação.</p>
         <p>O <b>ponderado ótimo</b> usa todos os jogos de clube desde jul/2019, com peso que cai pela metade a cada <b id="hlTxt"></b> dias. Testamos meias-vidas de 30 dias a peso igual para tudo, prevendo o total de gols dos 20 jogos seguintes a partir de várias datas desde jan/2024. Esta foi a que errou menos:</p>
@@ -593,10 +594,24 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
     </div>
   </section>
 
-  <footer>Dados de 10/10/2026, antes de Inter Miami x D.C. United, que começa à noite. Simulação feita no seu navegador. Nada aqui é previsão oficial.</footer>
+  <footer><span id="dataNote">Dados de 10/10/2026.</span> Simulação feita no seu navegador. Nada aqui é previsão oficial.</footer>
 </div>
 <script src="data/data.js"></script>
 <script src="sim.js"></script>
-<script src="app.js"></script>
+<script>
+/* Pelo tools/servidor.py, a corrida usa o jogo a jogo de agora do messivsronaldo.app (/api/corrida). Aberta com dois
+   cliques ou publicada como Artifact, não há servidor e fica o retrato de data/data.js. */
+(function () {
+  const start = () => { const s = document.createElement('script'); s.src = 'app.js'; document.body.appendChild(s); };
+  if (!/^https?:$/.test(location.protocol)) return start();
+  document.getElementById('dataStamp').textContent = 'buscando dados ao vivo…';
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 20000);
+  fetch('api/corrida', { signal: ctl.signal, cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => { if (d && d.players && d.aoVivo) window.DATA = d; })
+    .catch(() => { /* sem servidor: fica o retrato */ })
+    .finally(() => { clearTimeout(timer); start(); });
+})();
+</script>
 </body>
 </html>

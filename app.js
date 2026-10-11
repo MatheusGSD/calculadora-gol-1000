@@ -1,4 +1,5 @@
-/* Corrida ao Gol 1000 — interface: controles, animação, gráficos e replay. Depende de data/data.js (window.DATA) e sim.js (window.Sim). */
+/* Corrida ao Gol 1000 — interface: controles, animação, gráficos e replay. Depende de sim.js (window.Sim) e de window.DATA:
+   o de data/data.js ou, pelo tools/servidor.py, o de /api/corrida (o carregador no fim do index.html decide). */
 (function () {
   'use strict';
   const D = window.DATA, S = window.Sim;
@@ -115,7 +116,7 @@
     syncChips();
     $('customBox').hidden = id !== 'custom';
     if (id === 'custom') {
-      if (!state.custom) state.custom = { from: S.dayNum('2024-10-10'), to: TODAY };
+      if (!state.custom) { const t = dt(TODAY); state.custom = { from: Math.floor(Date.UTC(t.getUTCFullYear() - 2, t.getUTCMonth(), t.getUTCDate()) / DAY), to: TODAY }; }
       setupCustom();
       if (!customValid()) { updateWindowNote(paramsFor('custom')); return; }
     }
@@ -1079,8 +1080,28 @@
   function renderMethod() {
     $('hlTxt').textContent = String(D.halfLifeFit.best);
     $('dispTxt').textContent = `variância/média de ${fmtDec(P[0].dispersion)} no Messi e ${fmtDec(P[1].dispersion)} no CR7`;
-    const nReal = P.map((p) => p.fixtures.filter((f) => f[4] !== 2));
-    $('calTxt').innerHTML = `Calendário usado: Messi tem <b>${nReal[0].length}</b> jogos do Inter Miami com data publicada (até ${fmtDay(S.dayNum(nReal[0].at(-1)[0]))}); CR7 tem <b>${nReal[1].length}</b> jogos do Al-Nassr (até ${fmtDay(S.dayNum(nReal[1].at(-1)[0]))}). Depois disso, o calendário segue o formato de cada liga.`;
+    // com dados ao vivo, os jogos com data publicada vão sendo disputados e podem acabar
+    const cal = P.map((p, pi) => {
+      const real = p.fixtures.filter((f) => f[4] !== 2);
+      return real.length ? `<b>${real.length}</b> ${real.length === 1 ? 'jogo' : 'jogos'} do ${p.club} com data publicada (até ${fmtDay(S.dayNum(real.at(-1)[0]))})`
+        : `nenhum jogo do ${p.club} com data publicada pela frente`;
+    });
+    $('calTxt').innerHTML = `Calendário usado: Messi tem ${cal[0]}; CR7 tem ${cal[1]}. Depois disso, o calendário segue o formato de cada liga.`;
+  }
+  // de onde vêm os dados: ao vivo (servidor) ou o retrato de data/data.js
+  function renderSource() {
+    const last = P.map((p) => fmtDay(S.dayNum(p.history.at(-1)[0])).slice(0, 5));
+    const lastTxt = `Último jogo registrado: Messi em ${last[0]}, CR7 em ${last[1]}.`;
+    $('totMessi').textContent = fmtInt(START[0]); $('totCr7').textContent = fmtInt(START[1]);
+    $('totDate').textContent = fmtDay(TODAY);
+    if (D.aoVivo) {
+      const t = new Date(D.aoVivo.consultadoEm), hora = t.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      $('dataStamp').textContent = `dados ao vivo · ${hora}`;
+      $('dataNote').textContent = `Dados ao vivo do messivsronaldo.app, consultados em ${t.toLocaleDateString('pt-BR')} às ${hora}. ${lastTxt}`;
+    } else {
+      $('dataStamp').textContent = `dados até ${fmtDay(TODAY)}`;
+      $('dataNote').textContent = `Dados de ${fmtDay(TODAY)}. ${lastTxt}`;
+    }
   }
   function drawHalfLife() {
     const cv = $('hl'); const { ctx, w, h } = fitCanvas(cv), c = palette();
@@ -1134,6 +1155,7 @@
   // ---------- início ----------
   syncThemeBtn();
   syncChips();
+  renderSource();
   renderMethod();
   drawHalfLife();
   startRun();
