@@ -103,12 +103,14 @@ def club_matches(rows):
 
 # ---------------- calendário futuro ----------------
 GUARANTEED = {
-    'Inter Miami': ['MLS regular season 2026'],
+    'Inter Miami': ['MLS regular season 2026', 'MLS Cup Playoffs 2026 - Round One Game 1 (best-of-3)',
+                    'MLS Cup Playoffs 2026 - Round One Game 2 (best-of-3)'],
     'Al-Nassr': ['Saudi Pro League 2026-27', 'AFC Champions League Elite 2026-27 - league stage (West)',
                  "King's Cup 2026-27 - Round of 16", 'Saudi Super Cup 2026 - Semi-final'],
 }
 FX_COMP_PT = {
-    'MLS regular season 2026': 'MLS', 'Saudi Pro League 2026-27': 'Liga Saudita',
+    'MLS regular season 2026': 'MLS', 'MLS Cup Playoffs 2026 - Round One Game 1 (best-of-3)': 'Playoffs MLS · jogo 1',
+    'MLS Cup Playoffs 2026 - Round One Game 2 (best-of-3)': 'Playoffs MLS · jogo 2', 'Saudi Pro League 2026-27': 'Liga Saudita',
     'AFC Champions League Elite 2026-27 - league stage (West)': 'Champions da Ásia',
     "King's Cup 2026-27 - Round of 16": 'Copa do Rei · oitavas', 'Saudi Super Cup 2026 - Semi-final': 'Supercopa · semifinal',
 }

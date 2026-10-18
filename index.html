@@ -357,7 +357,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
 
   <header class="floodlight">
     <div class="topbar">
-      <div class="eyebrow">Simulação Monte Carlo · <span id="dataStamp">dados até 10/10/2026</span></div>
+      <div class="eyebrow">Simulação Monte Carlo · <span id="dataStamp">dados até 18/10/2026</span></div>
       <button class="icon-btn" id="themeBtn" type="button">Tema claro</button>
     </div>
     <h1>Corrida ao gol <span class="k">1000</span></h1>
@@ -367,8 +367,8 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
       <canvas class="board-fx" id="boardFx" aria-hidden="true"></canvas>
       <div class="side">
         <div class="who"><span class="chip m"></span>Messi</div>
-        <div class="led m num" id="ledMessi">932</div>
-        <div class="need" id="needMessi">faltam <b>68</b> · Inter Miami</div>
+        <div class="led m num" id="ledMessi">936</div>
+        <div class="need" id="needMessi">faltam <b>64</b> · Inter Miami</div>
         <div class="eta" id="etaMessi"></div>
       </div>
       <div class="vs">
@@ -377,8 +377,8 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
       </div>
       <div class="side r">
         <div class="who">Cristiano Ronaldo<span class="chip c"></span></div>
-        <div class="led c num" id="ledCr7">980</div>
-        <div class="need" id="needCr7">Al-Nassr · faltam <b>20</b></div>
+        <div class="led c num" id="ledCr7">981</div>
+        <div class="need" id="needCr7">Al-Nassr · faltam <b>19</b></div>
         <div class="eta" id="etaCr7"></div>
       </div>
     </div>
@@ -538,17 +538,17 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
         <div class="mini-board">
           <div class="mini">
             <div class="who"><span class="chip m"></span>Messi</div>
-            <div class="led m num" id="rMessi">932</div>
+            <div class="led m num" id="rMessi">936</div>
             <div class="lam" id="rLamMessi"></div>
           </div>
           <div class="mini">
             <div class="who"><span class="chip c"></span>CR7</div>
-            <div class="led c num" id="rCr7">980</div>
+            <div class="led c num" id="rCr7">981</div>
             <div class="lam" id="rLamCr7"></div>
           </div>
           <div class="full">
             <div class="ctl-label">Data na simulação</div>
-            <div class="sim-date" id="rDate">10/10/2026</div>
+            <div class="sim-date" id="rDate">18/10/2026</div>
           </div>
           <div class="banner full" id="rBanner" hidden></div>
         </div>
@@ -562,7 +562,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
     <div class="method">
       <div class="panel prose">
         <h3>Contagem</h3>
-        <p>Usamos a contagem da imprensa, a mesma de Opta, AFP, AP/ESPN e EFE e do perfil do próprio CR7, que bate jogo a jogo com o messivsronaldo.app: <b class="num" id="totCr7">980</b> gols do CR7 e <b class="num" id="totMessi">932</b> do Messi em <span id="totDate">10/10/2026</span>. O Transfermarkt dá 974 ao CR7 porque não conta os 6 gols da Copa Árabe de Clubes de 2023. Os gols por seleção estão nos totais, mas não entram na projeção: Messi se despediu da Argentina em 06/10/2026 e CR7 está suspenso provisoriamente pela federação portuguesa.</p>
+        <p>Usamos a contagem da imprensa, a mesma de Opta, AFP, AP/ESPN e EFE e do perfil do próprio CR7, que bate jogo a jogo com o messivsronaldo.app: <b class="num" id="totCr7">981</b> gols do CR7 e <b class="num" id="totMessi">936</b> do Messi em <span id="totDate">18/10/2026</span>. O Transfermarkt dá 6 gols a menos ao CR7 porque não conta os 6 gols da Copa Árabe de Clubes de 2023. Os gols por seleção estão nos totais, mas não entram na projeção: Messi se despediu da Argentina em 06/10/2026 e CR7 está suspenso provisoriamente pela federação portuguesa.</p>
         <h3>Modelo</h3>
         <p>Cada simulação sorteia um ritmo de gols por jogo para cada jogador, a partir do recorte escolhido (posteriori Gamma de um modelo Poisson, com priori de Jeffreys). Recorte curto significa ritmo mais incerto. Depois, sorteia os gols de cada jogo futuro do clube, em ordem, até a contagem chegar a 1000. Nos jogos de clube desde a estreia no clube atual, a variância dos gols por jogo fica abaixo da média (<span id="dispTxt"></span>), então a Poisson por jogo não subestima a variação.</p>
         <p>O <b>ponderado ótimo</b> usa todos os jogos de clube desde jul/2019, com peso que cai pela metade a cada <b id="hlTxt"></b> dias. Testamos meias-vidas de 30 dias a peso igual para tudo, prevendo o total de gols dos 20 jogos seguintes a partir de várias datas desde jan/2024. Esta foi a que errou menos:</p>
@@ -573,7 +573,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
         <ul>
           <li>Os dois jogam todos os jogos do clube. Sem lesão, descanso ou suspensão.</li>
           <li>Sem aposentadoria e sem queda de rendimento por idade. O ritmo do recorte vale até o fim.</li>
-          <li>Só jogos garantidos. Entram liga e fase de liga das copas, e mata-mata só quando o clube já está classificado (Copa do Rei, oitavas; Supercopa Saudita, semifinal). Playoffs da MLS, finais e copas ainda não disputadas ficam de fora, então as datas tendem a sair um pouco mais tarde que na vida real.</li>
+          <li>Só jogos garantidos. Entram liga e fase de liga das copas, e mata-mata só quando o clube já está classificado (Copa do Rei, oitavas; Supercopa Saudita, semifinal; playoffs da MLS, os dois primeiros jogos da 1ª fase, que é melhor de 3). O resto dos playoffs da MLS, finais e copas ainda não disputadas ficam de fora, então as datas tendem a sair um pouco mais tarde que na vida real.</li>
           <li>Depois do último jogo com data publicada, o calendário segue o formato de cada liga, sem datas reais: MLS 2027 com temporada curta de 14 jogos (fev a abr), e depois temporadas de 34 jogos de julho a abril; Liga Saudita com 34 rodadas de agosto a maio. Datas FIFA e pausas ficam sem jogos.</li>
           <li>Simulação que não chega até 2035 conta como "nenhum dos dois".</li>
         </ul>
@@ -594,7 +594,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
     </div>
   </section>
 
-  <footer><span id="dataNote">Dados de 10/10/2026.</span> Simulação feita no seu navegador. Nada aqui é previsão oficial.</footer>
+  <footer><span id="dataNote">Dados de 18/10/2026.</span> Simulação feita no seu navegador. Nada aqui é previsão oficial.</footer>
 </div>
 <script src="data/data.js"></script>
 <script src="sim.js"></script>
