@@ -1,5 +1,4 @@
-"""Serve as páginas do projeto, repassa à Transfermarkt as consultas da calculadora (jogador.html) e monta a corrida
-Messi × CR7 (index.html) com o histórico de agora do messivsronaldo.app.
+"""Serve a calculadora (index.html) e repassa à Transfermarkt as consultas dela.
 
 Por que um servidor: a busca por nome é uma página HTML da Transfermarkt, que o navegador não pode ler de outro
 site (CORS). Aqui tudo passa por /api/..., com um cache curto em memória para não martelar as fontes.
@@ -9,15 +8,11 @@ site (CORS). Aqui tudo passa por /api/..., com um cache curto em memória para n
   /api/transferencias/132098 -> transfermarkt.com/ceapi/transferHistory/list/132098 (nomes dos clubes)
   /api/perfil/132098         -> transfermarkt-api.fly.dev/players/132098/profile     (foto e posição; API
                                 comunitária e instável, por isso a página não depende dela)
-  /api/corrida               -> messivsronaldo.app, jogo a jogo dos dois, passado pelo build() de tools/build_data.py
-                                com a data de hoje; é o mesmo formato de data/data.js
 
-Os endpoints da Transfermarkt e do messivsronaldo.app não são documentados: podem mudar ou ser bloqueados sem aviso.
+Os endpoints da Transfermarkt não são documentados: podem mudar ou ser bloqueados sem aviso.
 
-Uso:  python -I tools/servidor.py      (abre http://localhost:8765/jogador.html; a corrida fica em /index.html)
+Uso:  python -I tools/servidor.py      (abre http://localhost:8765/)
 """
-import datetime
-import importlib.util
 import html
 import http.server
 import json
@@ -31,11 +26,6 @@ import urllib.request
 import webbrowser
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# python -I não põe a pasta do script no sys.path, então o build_data é carregado pelo caminho
-_spec = importlib.util.spec_from_file_location('build_data', os.path.join(ROOT, 'tools', 'build_data.py'))
-build_data = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(build_data)
-CORRIDA_TTL = 120
 PORT = 8765
 UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) gol1000'
 ROUTES = {
@@ -93,20 +83,6 @@ def parse_search(page):
     return json.dumps({'results': out}, ensure_ascii=False).encode()
 
 
-def corrida():
-    """Dados da corrida com o histórico de agora; guardados por CORRIDA_TTL segundos, como as consultas."""
-    with lock:
-        hit = cache.get('corrida')
-        if hit and time.time() - hit[0] < CORRIDA_TTL:
-            return hit[1]
-    raws = {p: json.loads(fetch(build_data.MVR_URL.format(slug), CORRIDA_TTL, 40)) for p, slug in build_data.MVR_SLUG.items()}
-    data = build_data.build(raws, datetime.date.today().isoformat())
-    data['aoVivo'] = {'fonte': 'messivsronaldo.app', 'consultadoEm': datetime.datetime.now().astimezone().isoformat(timespec='seconds')}
-    body = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode()
-    with lock:
-        cache['corrida'] = (time.time(), body)
-    return body
-
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
@@ -118,8 +94,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if parts[0] != 'api':
             return super().do_GET()
         name = parts[1] if len(parts) > 1 else ''
-        if name == 'corrida':
-            return self.reply(corrida)
         arg = urllib.parse.parse_qs(u.query).get('q', [''])[0].strip() if name == 'busca' else (parts[2] if len(parts) > 2 else '')
         if name not in ROUTES or not arg or (name != 'busca' and not arg.isdigit()):
             return self.send_error(404)
@@ -133,7 +107,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def reply(self, get):
         try:
             body, status = get(), 200
-        except Exception as e:  # só repassa o erro para a página mostrar (ou, na corrida, cair no data.js)
+        except Exception as e:  # só repassa o erro para a página mostrar
             body, status = json.dumps({'erro': str(e)}).encode(), 502
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -151,9 +125,9 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 if __name__ == '__main__':
-    url = f'http://localhost:{PORT}/jogador.html'
+    url = f'http://localhost:{PORT}/'
     with Server(('127.0.0.1', PORT), Handler) as srv:
-        print('No ar:', url, '| corrida ao vivo:', f'http://localhost:{PORT}/index.html', '(Ctrl+C para parar)', flush=True)
+        print('No ar:', url, '(Ctrl+C para parar)', flush=True)
         if os.environ.get('SEM_NAVEGADOR') != '1':
             threading.Timer(0.6, lambda: webbrowser.open(url)).start()
         srv.serve_forever()

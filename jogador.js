@@ -10,7 +10,7 @@
   const S = window.Sim;
   let LENDAS = [];   // data/lendas.json, carregado no início
   const DAY = 86400000, YEAR = 365.25;
-  const HALF_LIFE = 300;     // a meia-vida ajustada na página principal (data.json > halfLifeFit.best)
+  const HALF_LIFE = 300;     // a meia-vida ajustada na corrida Messi × CR7 (repositório messi-cr7-1000), em out/2026
   const PRIOR = [0.5, 0];    // Jeffreys, como na página principal
   const DECLINE_FROM = 33;   // a queda por idade começa aos 33 (ou no ponto de partida, se ele já passou disso)
   const RETIRED_AFTER = 540; // sem jogo oficial há mais de 540 dias: tratado como aposentado
