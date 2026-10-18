@@ -1,0 +1,29 @@
+# Toda segunda de manhã: baixa de novo da Transfermarkt a carreira dos jogadores da lista e sobe se algo mudou.
+name: Atualizar jogadores
+
+on:
+  schedule:
+    - cron: '30 9 * * 1'   # segunda, 9h30 UTC (6h30 em Brasília)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -I tools/build_jogadores.py
+      - name: Sobe se mudou
+        run: |
+          git add -A data/jogadores data/jogadores.json
+          if git diff --cached --quiet; then echo "nada novo"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Jogadores atualizados em $(date -u +%d/%m/%Y)"
+          git push

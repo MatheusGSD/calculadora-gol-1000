@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gol 1000 de qualquer jogador</title>
+<meta name="description" content="Quem chegaria ao gol 1000? Para cada jogador, a chance de chegar lá antes de se aposentar e a idade em que chegaria se nunca parasse.">
+<meta property="og:title" content="Gol 1000 de qualquer jogador">
+<meta property="og:description" content="Para cada jogador, a chance de chegar ao gol 1000 antes de se aposentar e a idade em que chegaria se nunca parasse.">
+<meta property="og:url" content="https://matheusgsd.github.io/calculadora-gol-1000/">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -48,6 +52,7 @@ h2 { font-size: 22px; margin-bottom: 8px; }
 .topbar a { color: var(--muted); }
 .topbar button { font: 600 14px var(--font-body); color: var(--fg); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
 footer { color: var(--muted); font-size: 13px; max-width: 80ch; }
+footer a { color: var(--fg); overflow-wrap: anywhere; }
 a { color: var(--accent); }
 header { margin-bottom: 18px; }
 header p { margin: 6px 0 0; color: var(--muted); max-width: 70ch; }
@@ -116,11 +121,11 @@ dd { margin: 0; }
   </nav>
   <header>
     <h1>Gol 1000 de qualquer jogador</h1>
-    <p>Escolha um jogador. A página pega a carreira oficial dele (jogo a jogo na Transfermarkt; as lendas, de uma base curada), mede o ritmo, simula se o gol 1000 sai antes da aposentadoria e calcula com que idade ele chegaria lá se nunca parasse, por absurda que seja.</p>
+    <p>Escolha um jogador. A página pega a carreira oficial dele (jogo a jogo na Transfermarkt, baixada toda semana; as lendas, de uma base curada), mede o ritmo, simula se o gol 1000 sai antes da aposentadoria e calcula com que idade ele chegaria lá se nunca parasse, por absurda que seja.</p>
   </header>
 
   <section class="card search">
-    <label for="busca" class="muted">Buscar jogador (nome, pelo menos 3 letras)</label>
+    <label for="busca" class="muted">Buscar entre os <span id="nLista">100</span> jogadores da lista e as lendas</label>
     <input id="busca" type="search" autocomplete="off" placeholder="ex.: Benzema, Lautaro, Vinícius">
     <ul id="resultados"></ul>
     <div class="chips-label">Em atividade</div>
@@ -212,7 +217,8 @@ dd { margin: 0; }
   </div>
 
   <footer>
-    <p>Jogadores em atividade: carreira oficial jogo a jogo da Transfermarkt, consultada ao vivo por endpoints não documentados (podem mudar sem aviso). A contagem da Transfermarkt pode diferir da imprensa: para o CR7 ela dá 6 gols a menos que a imprensa, porque não conta a Copa Árabe de Clubes de 2023. Lendas: jogos e gols oficiais por temporada, levantados à mão em Wikipedia, RSSSF e Guinness; as fontes de cada uma estão em "O que entrou na conta".</p>
+    <p>Jogadores: carreira oficial jogo a jogo da Transfermarkt, baixada toda semana por endpoints não documentados (podem mudar sem aviso). A lista tem os maiores artilheiros em atividade, nomes em ascensão e craques aposentados. A contagem da Transfermarkt pode diferir da imprensa: para o CR7 ela dá 6 gols a menos que a imprensa, porque não conta a Copa Árabe de Clubes de 2023. Lendas: jogos e gols oficiais por temporada, levantados à mão em Wikipedia, RSSSF e Guinness; as fontes de cada uma estão em "O que entrou na conta".</p>
+    <p>Levantamento de Matheus Dalmolin. Código sob licença MIT: <a href="https://github.com/MatheusGSD/calculadora-gol-1000" target="_blank" rel="noopener">github.com/MatheusGSD/calculadora-gol-1000</a>.</p>
   </footer>
 </div>
 <script src="sim.js"></script>

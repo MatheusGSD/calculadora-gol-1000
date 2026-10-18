@@ -1,5 +1,6 @@
 /* Gol 1000 de qualquer jogador — calculadora: um jogador por vez, meta sempre 1000. Depende de sim.js (window.Sim).
- * Dados: jogadores da Transfermarkt jogo a jogo, ao vivo (via tools/servidor.py); lendas vêm de data/lendas.json,
+ * Dados: jogadores da Transfermarkt jogo a jogo, pré-baixados toda semana em data/jogadores/ (tools/build_jogadores.py);
+ * pelo tools/servidor.py, a busca e o botão de atualizar vão também à Transfermarkt ao vivo. Lendas vêm de data/lendas.json,
  * curado à mão por temporada (tools/build_lendas.py), porque a Transfermarkt não tem o futebol dos anos 50-70.
  * Modelo: o mesmo Gamma-Poisson de sim.js (ritmo por jogo com peso que cai pela metade a cada 300 dias), com
  * calendário sintético (N jogos oficiais por ano). Duas perguntas:
@@ -9,6 +10,9 @@
   'use strict';
   const S = window.Sim;
   let LENDAS = [];   // data/lendas.json, carregado no início
+  let INDICE = [];   // data/jogadores.json: os jogadores pré-baixados (e as lendas, só para busca e foto)
+  // só pelo tools/servidor.py há /api/...; no GitHub Pages a página fica com a lista pré-baixada
+  const AO_VIVO = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   const DAY = 86400000, YEAR = 365.25;
   const HALF_LIFE = 300;     // a meia-vida ajustada na corrida Messi × CR7 (repositório messi-cr7-1000), em out/2026
   const PRIOR = [0.5, 0];    // Jeffreys, como na página principal
@@ -54,6 +58,25 @@
     if (!r.ok) throw new Error((j && j.erro) || `HTTP ${r.status} em ${path}`);
     return j;
   }
+
+  /* Carreira pré-baixada (data/jogadores/<id>.json), devolvida no formato da Transfermarkt que o parseCareer lê. */
+  async function savedCareer(id) {
+    const c = await getJSON(`data/jogadores/${id}.json`);
+    const performance = c.jogos.map(([date, clubId, goals, nt, compType]) => ({
+      gameInformation: { date: { dateTimeUTC: date + 'T12:00:00+00:00' }, isNationalGame: !!nt, competitionTypeId: compType, isLiveGame: false },
+      clubsInformation: { club: { clubId } },
+      statistics: { generalStatistics: { participationState: 'played' }, goalStatistics: { goalsScoredTotal: goals } },
+    }));
+    // a idade num jogo dá a data de nascimento
+    const k = c.nasc ? c.jogos.findIndex((j) => j[0] === c.nasc[0].slice(0, 10)) : -1;
+    if (k >= 0) {
+      performance[k].gameInformation.date.dateTimeUTC = c.nasc[0];
+      Object.assign(performance[k].statistics.generalStatistics, { age: c.nasc[1], ageDiscrepancyDays: c.nasc[2] });
+    }
+    const transfers = Object.entries(c.clubes).map(([cid, clubName]) => ({ from: { href: `/verein/${cid}`, clubName } }));
+    return { jogos: { data: { performance } }, transf: { transfers }, baixadoEm: c.baixadoEm };
+  }
+  const savedEntry = (id) => INDICE.find((p) => p.id === String(id) && !p.lenda);
 
   /* A carreira é uma lista de blocos {from, to, day, games, goals, nt, club}. Na Transfermarkt cada bloco é um jogo
    * (from = to); nas lendas, uma temporada. `day` é o meio do bloco, usado no peso do ritmo. */
@@ -258,19 +281,29 @@
   // ---------- estado da página ----------
   const state = { seq: 0 };
 
-  /* hint: o que já se sabe do jogador pela busca ({name, imageUrl, club, position}). O perfil completo vem da API
-   * comunitária, que é lenta e cai às vezes: chega depois e só completa foto/clube/posição. */
-  async function loadPlayer(id, hint) {
+  /* hint: o que já se sabe do jogador pela busca ({name, imageUrl, club, position}). Na lista pré-baixada, isso vem do
+   * índice. Ao vivo, o perfil completo vem da API comunitária, que é lenta e cai às vezes: chega depois e só completa
+   * foto/clube/posição. `live` força a consulta à Transfermarkt (botão de atualizar, só pelo servidor). */
+  async function loadPlayer(id, hint, live) {
     const seq = ++state.seq;
-    showLoading(`Buscando a carreira de ${hint.name || 'jogador ' + id} na Transfermarkt…`);
-    const profileP = getJSON('/api/perfil/' + id).catch(() => null);
+    const entry = live ? null : savedEntry(id);
+    if (entry) hint = Object.assign({}, entry, hint);
+    if (!entry && !AO_VIVO) {
+      $('carregando').hidden = true;
+      $('erro').hidden = false;
+      $('erro').textContent = `Esse jogador não está na lista desta página (${INDICE.filter((p) => !p.lenda).length} jogadores, atualizada toda semana).`;
+      return;
+    }
+    showLoading(entry ? `Carregando a carreira de ${hint.name}…` : `Buscando a carreira de ${hint.name || 'jogador ' + id} na Transfermarkt…`);
+    const profileP = entry ? Promise.resolve(null) : getJSON('/api/perfil/' + id).catch(() => null);
     try {
-      const [jogos, transf] = await Promise.all([
+      const { jogos, transf, baixadoEm } = entry ? await savedCareer(id) : await Promise.all([
         getJSON('/api/jogos/' + id),
         getJSON('/api/transferencias/' + id).catch(() => null),
-      ]);
+      ]).then(([j, t]) => ({ jogos: j, transf: t }));
       if (seq !== state.seq) return;
-      const today = todayNum();
+      // na lista pré-baixada, "hoje" é o dia da coleta: o ritmo e a idade param ali
+      const today = baixadoEm ? S.dayNum(baixadoEm) : todayNum();
       const career = parseCareer(jogos, transf, today);
       if (!career.blocks.length || career.birth == null) throw new Error('A Transfermarkt não devolveu jogos oficiais para esse jogador.');
       const last = career.blocks[career.blocks.length - 1];
@@ -279,7 +312,7 @@
       const slug = /^\/([^/]+)\//.exec((transf && transf.url) || '');
       const slugName = slug ? slug[1].split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : null;
       setup({ kind: 'tm', id, name: hint.name || slugName || `Jogador ${id}`, profile: hint, legend: null, career, retired,
-        ref: retired ? paceEnd(career.blocks) : today, end: retired ? last.to : today, fetchedAt: new Date() });
+        ref: retired ? paceEnd(career.blocks) : today, end: retired ? last.to : today, fetchedAt: baixadoEm ? null : new Date(), savedAt: baixadoEm || null });
       history.replaceState(null, '', '?id=' + id);
       profileP.then((p) => {
         if (!p || seq !== state.seq) return;
@@ -302,17 +335,11 @@
     const career = legendCareer(L);
     // o fim da última temporada (careerEnd costuma vir só com o ano)
     const end = career.blocks[career.blocks.length - 1].to;
-    setup({ kind: 'lenda', id: slug, name: L.name, profile: null, legend: L, career, retired: true, ref: paceEnd(career.blocks), end, fetchedAt: null });
+    // a foto vem da Transfermarkt, pelo índice pré-baixado, se o jogador estiver lá
+    const hit = L.tmId ? INDICE.find((x) => x.id === String(L.tmId)) : null;
+    const profile = hit && hit.imageUrl && !/default\.jpg/.test(hit.imageUrl) ? { imageUrl: hit.imageUrl } : null;
+    setup({ kind: 'lenda', id: slug, name: L.name, profile, legend: L, career, retired: true, ref: paceEnd(career.blocks), end, fetchedAt: null, savedAt: null });
     history.replaceState(null, '', '?lenda=' + slug);
-    // a foto vem da busca da Transfermarkt, se o jogador estiver lá
-    if (L.tmId) {
-      getJSON('/api/busca?q=' + encodeURIComponent(L.name)).then((r) => {
-        const hit = (r.results || []).find((x) => x.id === String(L.tmId));
-        if (!hit || !hit.imageUrl || /default\.jpg/.test(hit.imageUrl) || seq !== state.seq) return;
-        state.profile = { imageUrl: hit.imageUrl };
-        renderPlayer();
-      }).catch(() => {});
-    }
   }
 
   function showLoading(msg) {
@@ -335,7 +362,7 @@
     $('jogosAno').value = Math.max(1, Math.round(state.gpyAuto));
     $('queda').value = 0;
     $('campoAposentadoria').hidden = state.retired;
-    $('atualizar').hidden = state.kind !== 'tm';
+    $('atualizar').hidden = state.kind !== 'tm' || !AO_VIVO;
     $('cardAntes').hidden = state.retired;
     $('cardEncerrada').hidden = !state.retired;
     $('cardCdf').hidden = state.retired;
@@ -462,7 +489,8 @@
         (L.officialTotal.goals !== state.total ? ` (soma das temporadas usadas aqui: ${fmtInt(state.total)})` : '')]);
       if (L.notes) rows.push(['Observações', esc(L.notes)]);
     } else {
-      rows.push(['Fonte', `Transfermarkt, jogo a jogo; consultado às ${state.fetchedAt.toLocaleTimeString('pt-BR')}`]);
+      rows.push(['Fonte', state.fetchedAt ? `Transfermarkt, jogo a jogo; consultado às ${state.fetchedAt.toLocaleTimeString('pt-BR')}`
+        : `Transfermarkt, jogo a jogo; baixado em ${fmtDay(S.dayNum(state.savedAt))} (a lista é atualizada toda semana)`]);
     }
     rows.push(['Contados', `${fmtInt(games(c.blocks))} jogos oficiais: ${fmtInt(games(club))} por clubes (${fmtInt(goals(club))} gols) e ${fmtInt(games(nt))} pela seleção (${fmtInt(goals(nt))} gols)`]);
     if (!L) rows.push(['Excluídos', c.dropped.length ? c.dropped.map(([k, v]) => `${esc(k)}: ${plural(v.games, 'jogo', 'jogos')}, ${plural(v.goals, 'gol', 'gols')}`).join('<br>') : 'nada']);
@@ -641,24 +669,35 @@
   }
   let searchTimer = null, searchSeq = 0;
   const searchHits = new Map();   // id -> resultado da busca (nome, foto, clube, posição)
+  const norm = (t) => String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  function searchSaved(q) {
+    const words = norm(q).split(/\s+/).filter(Boolean);
+    return INDICE.filter((p) => { const n = norm(p.name); return words.every((w) => n.includes(w)); });
+  }
+  function renderHits(items, empty) {
+    for (const p of items) searchHits.set(p.id, p);
+    $('resultados').innerHTML = items.length ? items.map((p) =>
+      `<li><button type="button" data-id="${esc(p.id)}" data-nome="${esc(p.name)}"><strong>${esc(p.name)}</strong>
+       <span class="muted">${esc((p.lenda ? ['lenda'] : [p.position, p.club && p.club.name, p.age && p.age + ' anos', (p.nationalities || [])[0]]).filter(Boolean).join(' · '))}</span></button></li>`).join('')
+      : `<li class="muted">${empty}</li>`;
+  }
   $('busca').addEventListener('input', () => {
     clearTimeout(searchTimer);
+    const seq = ++searchSeq;
     const q = $('busca').value.trim();
-    if (q.length < 3) { $('resultados').innerHTML = ''; return; }
+    if (q.length < 2) { $('resultados').innerHTML = ''; return; }
+    const saved = searchSaved(q).slice(0, 10);
+    renderHits(saved, AO_VIVO && q.length >= 3 ? 'buscando na Transfermarkt…' : 'ninguém com esse nome na lista');
+    if (!AO_VIVO || q.length < 3) return;
+    // pelo servidor, completa com a busca da Transfermarkt (quem não está na lista é baixado ao vivo)
     searchTimer = setTimeout(async () => {
-      const seq = ++searchSeq;
-      $('resultados').innerHTML = '<li class="muted">buscando…</li>';
       try {
         const r = await getJSON('/api/busca?q=' + encodeURIComponent(q));
         if (seq !== searchSeq) return;
-        const items = (r.results || []).slice(0, 10);
-        for (const p of items) searchHits.set(p.id, p);
-        $('resultados').innerHTML = items.length ? items.map((p) =>
-          `<li><button type="button" data-id="${esc(p.id)}" data-nome="${esc(p.name)}"><strong>${esc(p.name)}</strong>
-           <span class="muted">${esc([p.position, p.club && p.club.name, p.age && p.age + ' anos', (p.nationalities || [])[0]].filter(Boolean).join(' · '))}</span></button></li>`).join('')
-          : '<li class="muted">ninguém com esse nome</li>';
+        const ids = new Set(saved.map((p) => p.id));
+        renderHits(saved.concat((r.results || []).filter((p) => !ids.has(p.id))).slice(0, 10), 'ninguém com esse nome');
       } catch (e) {
-        if (seq === searchSeq) $('resultados').innerHTML = `<li class="muted">busca falhou: ${esc(e.message)}</li>`;
+        if (seq === searchSeq && !saved.length) $('resultados').innerHTML = `<li class="muted">busca falhou: ${esc(e.message)}</li>`;
       }
     }, 350);
   });
@@ -674,7 +713,7 @@
     else loadPlayer(b.dataset.id, searchHits.get(b.dataset.id) || { name: b.dataset.nome });
   });
   for (const id of ['aposentadoria', 'jogosAno', 'queda']) $(id).addEventListener('input', () => state.career && run());
-  $('atualizar').addEventListener('click', () => state.kind === 'tm' && loadPlayer(state.id, state.profile || { name: state.name }));
+  $('atualizar').addEventListener('click', () => state.kind === 'tm' && loadPlayer(state.id, state.profile || { name: state.name }, true));
   let resizeTimer = null;
   const redraw = () => { if (!state.proj) return; drawCareer(); if (state.sim) drawCdf(); };
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(redraw, 120); });
@@ -697,8 +736,10 @@
   syncThemeBtn();
 
   // ---------- início ----------
-  getJSON('data/lendas.json').catch(() => []).then((lendas) => {
+  Promise.all([getJSON('data/lendas.json').catch(() => []), getJSON('data/jogadores.json').catch(() => [])]).then(([lendas, indice]) => {
     LENDAS = lendas;
+    INDICE = indice;
+    $('nLista').textContent = indice.filter((p) => !p.lenda).length;
     renderPresets();
     const qs = new URLSearchParams(location.search);
     const startId = qs.get('id'), startLenda = qs.get('lenda');
