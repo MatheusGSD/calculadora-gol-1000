@@ -1,9 +1,9 @@
-# Toda segunda de manhã: baixa de novo da Transfermarkt a carreira dos jogadores da lista e sobe se algo mudou.
+# Baixa de novo da Transfermarkt a carreira dos jogadores da lista e sobe se algo mudou. Só à mão: a Transfermarkt
+# bloqueia os servidores do GitHub (a primeira tentativa, em 18/10/2026, falhou em todos), então a coleta semanal
+# roda no computador do autor.
 name: Atualizar jogadores
 
 on:
-  schedule:
-    - cron: '30 9 * * 1'   # segunda, 9h30 UTC (6h30 em Brasília)
   workflow_dispatch:
 
 permissions:
