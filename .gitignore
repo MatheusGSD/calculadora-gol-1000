@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# registro da coleta semanal local
+tools/atualizar_semanal.log
