@@ -2,9 +2,9 @@
 
 Calculadora que mostra um jogador por vez, com meta sempre 1000. Para quem está em atividade, simula a chance de chegar ao gol 1000 antes da aposentadoria. Para todos, inclusive aposentados e lendas, calcula com que idade o gol 1000 sairia se ele nunca parasse, por absurda que seja a idade.
 
-**Página:** https://matheusgsd.github.io/calculadora-gol-1000/
+**Página:** https://dalmolin.dev/calculadora-gol-1000/
 
-Nasceu da [corrida Messi × CR7 ao gol 1000](https://matheusgsd.github.io/messi-cr7-1000/), que é outro repositório.
+Nasceu da [corrida Messi × CR7 ao gol 1000](https://dalmolin.dev/messi-cr7-1000/), que é outro repositório.
 
 ## De onde vêm os dados
 
